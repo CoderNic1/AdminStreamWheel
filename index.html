@@ -565,18 +565,34 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     </div>
   </div>
 
-  <!-- Password reset -->
+  <!-- Password management -->
   <div class="drawer-section">
-    <div class="drawer-section-title">Password Reset</div>
-    <div style="font-size:0.75rem;font-weight:600;color:var(--text2);margin-bottom:10px;line-height:1.6">
-      Generates a one-time recovery code and stores it in Firestore. User enters this code in the login screen to set a new password. Code expires in 24 hours.
+    <div class="drawer-section-title">🔑 Password Management</div>
+
+    <!-- View current password -->
+    <div style="margin-bottom:14px">
+      <div class="field-label" style="margin-bottom:6px">Current Password</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div id="dPasswordDisplay" style="flex:1;background:var(--bg);border:1.5px solid var(--border2);border-radius:var(--radius-sm);padding:8px 12px;font-family:var(--mono);font-size:0.85rem;color:var(--text2);letter-spacing:3px;min-height:36px">
+          ••••••••
+        </div>
+        <button class="btn btn-ghost btn-sm" id="dPasswordRevealBtn" onclick="swRevealPassword()" title="Show / hide password">👁️</button>
+        <button class="btn btn-ghost btn-sm" onclick="swCopyPassword()" title="Copy to clipboard">📋</button>
+      </div>
+      <div id="dPasswordNote" style="font-size:0.65rem;color:var(--text3);margin-top:4px;font-weight:600"></div>
     </div>
-    <div id="recoveryCodeDisplay" style="display:none;background:var(--bg);border:1.5px dashed var(--accent);border-radius:8px;padding:12px;margin-bottom:10px;text-align:center">
-      <div style="font-size:0.65rem;font-weight:800;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px">Recovery Code (share privately)</div>
-      <div id="recoveryCodeValue" style="font-size:1.4rem;font-weight:900;font-family:var(--mono);color:var(--accent);letter-spacing:4px"></div>
-      <div id="recoveryCodeExpiry" style="font-size:0.68rem;color:var(--text3);margin-top:4px"></div>
+
+    <!-- Set new password -->
+    <div class="field-group" style="margin-bottom:10px">
+      <div class="field-label">Set New Password</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" class="field-input" id="dNewPassword" placeholder="Enter new password…"
+          style="flex:1;font-family:var(--mono)" autocomplete="off" />
+        <button class="btn btn-ghost btn-sm" onclick="swGeneratePassword()" title="Generate random password">🎲</button>
+      </div>
+      <div style="font-size:0.65rem;color:var(--text3);margin-top:4px;font-weight:600">Min. 8 characters. Will be saved to Firestore — user applies it on next login.</div>
     </div>
-    <button class="btn btn-ghost btn-sm" onclick="swGenerateRecoveryCode()">🔑 Generate Recovery Code</button>
+    <button class="btn btn-primary btn-sm" onclick="swSetUserPassword()">💾 Save New Password</button>
   </div>
 
   <!-- Leaderboard (premium only) -->
@@ -934,8 +950,6 @@ window.swOpenDrawer = function(uid) {
   // Show leaderboard section for premium
   document.getElementById('drawerLbSection').style.display = user.isPremium ? 'block' : 'none';
   document.getElementById('drawerLbContent').innerHTML = '<div class="empty-state" style="padding:10px">Click Load to fetch</div>';
-  document.getElementById('recoveryCodeDisplay').style.display = 'none';
-
   document.getElementById('drawerBackdrop').classList.add('show');
   document.getElementById('userDrawer').classList.add('open');
 };
@@ -979,22 +993,98 @@ window.swSaveDrawerChanges = function() {
   swCloseDrawer();
 };
 
-window.swGenerateRecoveryCode = async function() {
+// ── Password management helpers ──
+let _drawerPasswordRevealed = false;
+let _drawerPasswordValue    = '';   // plaintext as stored in Firestore
+
+window.swOpenDrawer = (function(_orig) {
+  return function(uid) {
+    _orig(uid);
+    // Reset password panel state whenever drawer opens
+    _drawerPasswordRevealed = false;
+    _drawerPasswordValue    = '';
+    const display = document.getElementById('dPasswordDisplay');
+    const note    = document.getElementById('dPasswordNote');
+    const revBtn  = document.getElementById('dPasswordRevealBtn');
+    const newInp  = document.getElementById('dNewPassword');
+    if (display) display.textContent = '••••••••';
+    if (note)    note.textContent    = '';
+    if (revBtn)  revBtn.textContent  = '👁️';
+    if (newInp)  newInp.value        = '';
+
+    // Fetch stored password from Firestore
+    const user = usersCache.find(u => u.uid === uid);
+    if (user) {
+      getDoc(doc(db, 'hosts', uid)).then(snap => {
+        if (snap.exists()) {
+          const data = snap.data();
+          _drawerPasswordValue = data.adminSetPassword || '';
+          if (note) note.textContent = _drawerPasswordValue
+            ? 'Password stored in Firestore ✓'
+            : 'No admin-set password on record';
+        }
+      }).catch(() => {});
+    }
+  };
+})(window.swOpenDrawer);
+
+window.swRevealPassword = function() {
+  _drawerPasswordRevealed = !_drawerPasswordRevealed;
+  const display = document.getElementById('dPasswordDisplay');
+  const btn     = document.getElementById('dPasswordRevealBtn');
+  if (!display) return;
+  if (_drawerPasswordRevealed) {
+    display.textContent = _drawerPasswordValue || '(no password set)';
+    display.style.letterSpacing = '1px';
+    display.style.color = 'var(--text)';
+    btn.textContent = '🙈';
+  } else {
+    display.textContent = '••••••••';
+    display.style.letterSpacing = '3px';
+    display.style.color = 'var(--text2)';
+    btn.textContent = '👁️';
+  }
+};
+
+window.swCopyPassword = function() {
+  if (!_drawerPasswordValue) { toast('No password stored yet'); return; }
+  navigator.clipboard.writeText(_drawerPasswordValue)
+    .then(() => toast('📋 Password copied to clipboard'))
+    .catch(() => toast('Copy failed — check browser permissions'));
+};
+
+window.swGeneratePassword = function() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$';
+  let pw = '';
+  for (let i = 0; i < 12; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+  const inp = document.getElementById('dNewPassword');
+  if (inp) inp.value = pw;
+};
+
+window.swSetUserPassword = async function() {
   if (!currentDrawerUid) return;
+  const inp = document.getElementById('dNewPassword');
+  const pw  = (inp?.value || '').trim();
+  if (!pw) { toast('⚠️ Enter a new password first'); return; }
+  if (pw.length < 8) { toast('⚠️ Password must be at least 8 characters'); return; }
   const user = usersCache.find(u => u.uid === currentDrawerUid);
-  const code   = generateCode(8);
-  const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
   try {
     await setDoc(doc(db, 'hosts', currentDrawerUid), {
-      recoveryCode: code,
-      recoveryExpiry: expiry.toISOString()
+      adminSetPassword: pw,
+      adminSetPasswordAt: new Date().toISOString()
     }, { merge: true });
-    document.getElementById('recoveryCodeDisplay').style.display = 'block';
-    document.getElementById('recoveryCodeValue').textContent = code;
-    document.getElementById('recoveryCodeExpiry').textContent = 'Expires: ' + expiry.toLocaleString();
-    logChange({ type: 'recovery_code', uid: currentDrawerUid, username: user?.username,
-      label: `Recovery code generated for @${user?.username}`, oldVal:'—', newVal:'[CODE]', committed:true });
-    toast('🔑 Recovery code generated and saved to Firestore');
+    _drawerPasswordValue = pw;
+    const note = document.getElementById('dPasswordNote');
+    if (note) note.textContent = 'Password stored in Firestore ✓';
+    if (inp) inp.value = '';
+    // If currently revealed, update display
+    if (_drawerPasswordRevealed) {
+      const display = document.getElementById('dPasswordDisplay');
+      if (display) display.textContent = pw;
+    }
+    logChange({ type: 'password_set', uid: currentDrawerUid, username: user?.username,
+      label: `Password set for @${user?.username}`, oldVal:'[old]', newVal:'[new pw]', committed:true });
+    toast('🔑 New password saved to Firestore');
   } catch(e) { toast('✗ Failed: ' + e.message); }
 };
 
@@ -1045,32 +1135,8 @@ window.swDeleteUserFromDrawer = async function() {
 };
 
 // ══════════════════════════════════════════════════════════════
-//  PENDING CHANGES → PUSH
+//  PENDING CHANGES → PUSH  (full implementation below, after LB helpers)
 // ══════════════════════════════════════════════════════════════
-window.swPushChanges = async function() {
-  if (!pendingChanges.length) { toast('No pending changes'); return; }
-  const btn = document.getElementById('pushAllBtn');
-  if (btn) btn.disabled = true;
-  let pushed = 0, failed = 0;
-  for (const change of pendingChanges) {
-    try {
-      await setDoc(doc(db, 'hosts', change.uid), { [change.field]: change.newVal }, { merge: true });
-      // Sync to local cache
-      const cached = usersCache.find(u => u.uid === change.uid);
-      if (cached) cached[change.field] = change.newVal;
-      logChange({ ...change, committed: true });
-      pushed++;
-    } catch(e) {
-      toast(`✗ Failed to push ${change.field} for ${change.uid}: ${e.message}`);
-      failed++;
-    }
-  }
-  pendingChanges = [];
-  renderPendingBanner();
-  swFilterUsers();
-  toast(`✅ Pushed ${pushed} change${pushed !== 1 ? 's' : ''}${failed ? ` (${failed} failed)` : ''}`);
-  if (btn) btn.disabled = false;
-};
 
 window.swDiscardChanges = function() {
   if (!pendingChanges.length) return;
@@ -1287,23 +1353,24 @@ window.swQueueLbChanges = function(uid) {
   toast('✅ LB changes queued — push from Change Log or banner');
 };
 
-// Override swPushChanges to handle LB saves too
-const _origPush = window.swPushChanges;
+// ══════════════════════════════════════════════════════════════
+//  PUSH ALL PENDING CHANGES (handles host edits + LB saves)
+// ══════════════════════════════════════════════════════════════
 window.swPushChanges = async function() {
   if (!pendingChanges.length) { toast('No pending changes'); return; }
   const btn = document.getElementById('pushAllBtn');
   if (btn) btn.disabled = true;
   let pushed = 0, failed = 0;
-  for (const change of pendingChanges) {
+  for (const change of [...pendingChanges]) {
     try {
       if (change._lbUid && change._lbData) {
-        // Leaderboard save
+        // Leaderboard full save
         await setDoc(doc(db, 'leaderboards', change._lbUid), {
           players: change._lbData.players,
           lastSynced: serverTimestamp()
         });
       } else if (change._lbUid && change.field === 'players' && !change._lbData) {
-        // Remove-only (no _lbData) — rebuild from cache
+        // Leaderboard remove-only — rebuild from cache
         const cached = lbCache[change._lbUid];
         if (cached) await setDoc(doc(db, 'leaderboards', change._lbUid), {
           players: cached.players || [],
