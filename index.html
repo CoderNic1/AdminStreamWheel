@@ -1,50 +1,4 @@
-// ==============================
-//  USER PASSWORD MANAGEMENT (admin sets directly)
-// ==============================
-window.swSetTempPassword = async function() {
-  const pw = (document.getElementById('dTempPassword') || {}).value || '';
-  if (!pw) { toast('Enter a temporary password'); return; }
-  if (pw.length < 8) { toast('Password must be at least 8 characters'); return; }
-  if (!currentDrawerUid) { toast('No user selected'); return; }
-  const user = usersCache.find(u => u.uid === currentDrawerUid);
-
-  // Firebase does not allow setting another user's password from the client SDK.
-  // We store the hashed temp password indicator in Firestore and use a recovery
-  // code mechanism. For a true direct reset, use Firebase Admin SDK (Cloud Function).
-  // Here we use the recoveryCode field approach: store the raw temp pw encrypted-ish
-  // as a recovery token that index.html checks on login.
-  // Best UX: store it as a recovery code the user pastes, or use Admin SDK.
-  // We store it as a plaintext recoveryCode (only visible to admin, expires 1h).
-  const expiry = new Date(Date.now() + 60 * 60 * 1000);
-  try {
-    await setDoc(doc(db, 'hosts', currentDrawerUid), {
-      recoveryCode: pw,
-      recoveryExpiry: expiry.toISOString()
-    }, { merge: true });
-    const result = document.getElementById('tempPwResult');
-    const val = document.getElementById('tempPwValue');
-    if (result) result.style.display = 'block';
-    if (val) val.textContent = pw;
-    document.getElementById('dTempPassword').value = '';
-    logChange({ type: 'temp_password', uid: currentDrawerUid, username: user?.username,
-      label: 'Temp password set for @' + (user?.username || currentDrawerUid),
-      oldVal: '[previous]', newVal: '[temp pw stored as recovery code]', committed: true });
-    toast('Password stored as recovery code. User can log in with it once.');
-  } catch(e) { toast('Failed: ' + e.message); }
-};
-
-window.swGenerateTempPassword = function() {
-  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$';
-  let pw = '';
-  for (let i = 0; i < 12; i++) pw += chars[Math.floor(Math.random() * chars.length)];
-  const inp = document.getElementById('dTempPassword');
-  if (inp) { inp.value = pw; inp.type = 'text'; }
-};
-
-// ==============================
-//  SHARED UTILS
-// ==============================
-function escHtml(s) {<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -488,9 +442,15 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
         <div class="flex-gap">
           <button class="btn btn-gold btn-sm" onclick="swPushChanges()" id="pushAllBtn">☁️ Push Pending Changes</button>
           <button class="btn btn-ghost btn-sm" onclick="swDiscardChanges()">✕ Discard Pending</button>
+          <button class="btn btn-ghost btn-sm" onclick="swClearOldLogs()" title="Remove committed log entries older than 30 days">🧹 Clear Old Logs</button>
         </div>
       </div>
       <div class="card">
+        <div id="changelogStatsBar" style="font-size:0.72rem;font-weight:700;color:var(--text3);margin-bottom:12px;display:flex;gap:16px;flex-wrap:wrap">
+          <span>Total entries: <strong id="logStatTotal" style="color:var(--text)">0</strong></span>
+          <span>Older than 30d: <strong id="logStatOld" style="color:var(--orange)">0</strong></span>
+          <span>localStorage used: <strong id="logStatSize" style="color:var(--text2)">—</strong></span>
+        </div>
         <div id="changelogTableWrap">
           <div class="empty-state"><div class="empty-icon">📋</div>No changes yet.</div>
         </div>
@@ -586,43 +546,19 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     </div>
   </div>
 
-  <!-- Password reset -->
+  <!-- Password reset — recovery code only -->
   <div class="drawer-section">
-    <!-- Direct temp password -->
-    <div style="margin-bottom:14px">
-      <div style="font-size:0.72rem;font-weight:700;color:var(--text2);margin-bottom:8px;line-height:1.5">
-        Set a temporary password directly and share it via Discord. User can change it in settings after login.
-      </div>
-      <div class="field-group" style="margin-bottom:8px">
-        <div class="field-label">Temporary Password</div>
-        <div style="position:relative">
-          <input type="password" class="field-input" id="dTempPassword" placeholder="min 8 characters" style="padding-right:38px" />
-          <button type="button"
-            onclick="(function(b){var i=document.getElementById('dTempPassword');i.type=i.type==='password'?'text':'password';b.textContent=i.type==='password'?'show':'hide'})(this)"
-            style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:0.72rem;font-weight:700;color:var(--text3)">show</button>
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-primary btn-sm" onclick="swSetTempPassword()">Set Password</button>
-        <button class="btn btn-ghost btn-sm" onclick="swGenerateTempPassword()">Random</button>
-      </div>
-      <div id="tempPwResult" style="display:none;margin-top:10px;background:var(--bg);border:1.5px dashed var(--green);border-radius:8px;padding:10px;text-align:center">
-        <div style="font-size:0.65rem;font-weight:800;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px">Password Set - Share Privately</div>
-        <div id="tempPwValue" style="font-size:1.1rem;font-weight:900;font-family:var(--mono);color:var(--green);letter-spacing:2px"></div>
-        <div style="font-size:0.68rem;color:var(--text3);margin-top:4px">Remind user to change it after login</div>
-      </div>
+    <div class="drawer-section-title">🔑 Password Reset</div>
+    <div style="font-size:0.72rem;font-weight:700;color:var(--text2);margin-bottom:10px;line-height:1.6">
+      Generates a one-time recovery code stored in Firestore (expires 24h). Share it privately with the user via Discord — they enter it on the login screen to set a new password.
     </div>
-    <div style="border-top:1px dashed var(--border2);padding-top:12px">
-      <div style="font-size:0.72rem;font-weight:700;color:var(--text2);margin-bottom:8px;line-height:1.5">
-        Or generate a one-time recovery code (expires 24h). User enters it on the login screen to reset their password.
-      </div>
-      <div id="recoveryCodeDisplay" style="display:none;background:var(--bg);border:1.5px dashed var(--accent);border-radius:8px;padding:12px;margin-bottom:10px;text-align:center">
-        <div style="font-size:0.65rem;font-weight:800;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px">Recovery Code (share privately)</div>
-        <div id="recoveryCodeValue" style="font-size:1.4rem;font-weight:900;font-family:var(--mono);color:var(--accent);letter-spacing:4px"></div>
-        <div id="recoveryCodeExpiry" style="font-size:0.68rem;color:var(--text3);margin-top:4px"></div>
-      </div>
-      <button class="btn btn-ghost btn-sm" onclick="swGenerateRecoveryCode()">Generate Recovery Code</button>
+    <div id="recoveryCodeDisplay" style="display:none;background:var(--bg);border:1.5px dashed var(--accent);border-radius:8px;padding:14px;margin-bottom:10px;text-align:center">
+      <div style="font-size:0.6rem;font-weight:800;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px">Recovery Code — Share Privately</div>
+      <div id="recoveryCodeValue" style="font-size:1.6rem;font-weight:900;font-family:var(--mono);color:var(--accent);letter-spacing:6px;margin-bottom:4px"></div>
+      <div id="recoveryCodeExpiry" style="font-size:0.68rem;color:var(--text3)"></div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:8px;font-size:0.68rem" onclick="navigator.clipboard.writeText(document.getElementById('recoveryCodeValue').textContent).then(()=>toast('Copied!'))">📋 Copy Code</button>
     </div>
+    <button class="btn btn-primary btn-sm" onclick="swGenerateRecoveryCode()">🔑 Generate Recovery Code</button>
   </div>
 
   <!-- Leaderboard (premium only) -->
@@ -665,7 +601,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "273242276635",
   appId:             "1:273242276635:web:d6de4c21292fc7295b09be"
 };
-const ADMIN_URL_KEY   = "xK9m2pQr7vNs4wJbptmna85482fjjdnzb8"; 
+const ADMIN_URL_KEY   = "xK9m2pQr7vNs4wJbptmna85482fjjdnzb8"; // ← CHANGE THIS to a long random string
 const DISCORD_URL     = "https://discord.gg/DhDzyC94mV";
 
 // ── Init Firebase ──
@@ -938,8 +874,6 @@ window.swOpenDrawer = function(uid) {
   document.getElementById('drawerLbSection').style.display = user.isPremium ? 'block' : 'none';
   document.getElementById('drawerLbContent').innerHTML = '<div class="empty-state" style="padding:10px">Click Load to fetch</div>';
   document.getElementById('recoveryCodeDisplay').style.display = 'none';
-  const tpr = document.getElementById('tempPwResult'); if (tpr) tpr.style.display = 'none';
-  const dtp = document.getElementById('dTempPassword'); if (dtp) { dtp.value = ''; dtp.type = 'password'; }
 
   document.getElementById('drawerBackdrop').classList.add('show');
   document.getElementById('userDrawer').classList.add('open');
@@ -1097,20 +1031,33 @@ function renderChangelog() {
     ...pending.map(c => ({ ...c, _pending: true })),
     ...changeLog
   ];
+
+  // Update stats bar
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const oldCount = changeLog.filter(c => c.ts && new Date(c.ts).getTime() <= cutoff).length;
+  const rawSize = localStorage.getItem('sw_admin_log') || '';
+  const sizeKb = (new Blob([rawSize]).size / 1024).toFixed(1);
+  const totalEl = document.getElementById('logStatTotal');
+  const oldEl = document.getElementById('logStatOld');
+  const sizeEl = document.getElementById('logStatSize');
+  if (totalEl) totalEl.textContent = changeLog.length;
+  if (oldEl) { oldEl.textContent = oldCount; oldEl.style.color = oldCount > 0 ? 'var(--orange)' : 'var(--text3)'; }
+  if (sizeEl) sizeEl.textContent = sizeKb + ' KB';
+
   if (!all.length) {
-    wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div>No changes yet.</div>';
+    wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">\uD83D\uDCCB</div>No changes yet.</div>';
     return;
   }
   wrap.innerHTML = `<table class="log-table">
     <thead><tr><th>Time</th><th>Type</th><th>Target</th><th>Field</th><th>Old</th><th>New</th><th>Status</th></tr></thead>
     <tbody>${all.map(c => `<tr>
-      <td style="white-space:nowrap;color:var(--text3)">${c._pending ? '⏳ pending' : (c.ts ? new Date(c.ts).toLocaleTimeString() : '—')}</td>
+      <td style="white-space:nowrap;color:var(--text3)">${c._pending ? '\u23F3 pending' : (c.ts ? new Date(c.ts).toLocaleString() : '\u2014')}</td>
       <td>${escHtml(c.type||'edit')}</td>
-      <td style="color:var(--accent)">@${escHtml(c.username||c.uid?.slice(0,8)||'—')}</td>
-      <td>${escHtml(c.field||'—')}</td>
-      <td class="log-old">${escHtml(String(c.oldVal ?? '—'))}</td>
-      <td class="${c._pending ? 'log-pending' : 'log-new'}">${escHtml(String(c.newVal ?? '—'))}</td>
-      <td style="font-size:0.65rem">${c._pending ? '<span style="color:var(--gold)">PENDING</span>' : (c.committed ? '<span style="color:var(--green)">✓ PUSHED</span>' : '<span style="color:var(--red)">DISCARDED</span>')}</td>
+      <td style="color:var(--accent)">@${escHtml(c.username||c.uid?.slice(0,8)||'\u2014')}</td>
+      <td>${escHtml(c.field||'\u2014')}</td>
+      <td class="log-old">${escHtml(String(c.oldVal ?? '\u2014'))}</td>
+      <td class="${c._pending ? 'log-pending' : 'log-new'}">${escHtml(String(c.newVal ?? '\u2014'))}</td>
+      <td style="font-size:0.65rem">${c._pending ? '<span style="color:var(--gold)">PENDING</span>' : (c.committed ? '<span style="color:var(--green)">\u2713 PUSHED</span>' : '<span style="color:var(--red)">DISCARDED</span>')}</td>
     </tr>`).join('')}</tbody>
   </table>`;
 }
@@ -1373,38 +1320,24 @@ window.swUpdateAdminAccount = async function() {
 };
 
 // ══════════════════════════════════════════════════════════════
-//  USER PASSWORD MANAGEMENT
+//  CHANGE LOG — CLEAR OLD ENTRIES
 // ══════════════════════════════════════════════════════════════
-window.swSetTempPassword = async function() {
-  const pw = (document.getElementById('dTempPassword') || {}).value || '';
-  if (!pw) { toast('Enter a temporary password'); return; }
-  if (pw.length < 8) { toast('Password must be at least 8 characters'); return; }
-  if (!currentDrawerUid) { toast('No user selected'); return; }
-  const user = usersCache.find(u => u.uid === currentDrawerUid);
-  const expiry = new Date(Date.now() + 60 * 60 * 1000);
-  try {
-    await setDoc(doc(db, 'hosts', currentDrawerUid), {
-      recoveryCode: pw,
-      recoveryExpiry: expiry.toISOString()
-    }, { merge: true });
-    const result = document.getElementById('tempPwResult');
-    const val = document.getElementById('tempPwValue');
-    if (result) result.style.display = 'block';
-    if (val) val.textContent = pw;
-    document.getElementById('dTempPassword').value = '';
-    logChange({ type: 'temp_password', uid: currentDrawerUid, username: user?.username,
-      label: 'Temp password set for @' + (user?.username || currentDrawerUid),
-      oldVal: '[previous]', newVal: '[stored as recovery code, expires 1h]', committed: true });
-    toast('Temp password saved. Share it privately — user enters it like a recovery code.');
-  } catch(e) { toast('Failed: ' + e.message); }
-};
-
-window.swGenerateTempPassword = function() {
-  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$';
-  let pw = '';
-  for (let i = 0; i < 12; i++) pw += chars[Math.floor(Math.random() * chars.length)];
-  const inp = document.getElementById('dTempPassword');
-  if (inp) { inp.value = pw; inp.type = 'text'; }
+window.swClearOldLogs = function() {
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000; // 30 days ago
+  const before = changeLog.length;
+  // Only remove committed/discarded entries older than 30 days — never pending
+  changeLog = changeLog.filter(function(c) {
+    if (!c.ts) return false; // no timestamp = remove
+    return new Date(c.ts).getTime() > cutoff;
+  });
+  const removed = before - changeLog.length;
+  if (removed === 0) {
+    toast('No log entries older than 30 days to remove');
+    return;
+  }
+  localStorage.setItem('sw_admin_log', JSON.stringify(changeLog));
+  renderChangelog();
+  toast('🧹 Removed ' + removed + ' old log entr' + (removed === 1 ? 'y' : 'ies'));
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -1420,6 +1353,7 @@ window.swLoadStats = window.swLoadStats;
 // Init pending banner state
 renderPendingBanner();
 renderChangelog();
+
 
 </script>
 </body>
