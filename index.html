@@ -1,4 +1,50 @@
-<!DOCTYPE html>
+// ==============================
+//  USER PASSWORD MANAGEMENT (admin sets directly)
+// ==============================
+window.swSetTempPassword = async function() {
+  const pw = (document.getElementById('dTempPassword') || {}).value || '';
+  if (!pw) { toast('Enter a temporary password'); return; }
+  if (pw.length < 8) { toast('Password must be at least 8 characters'); return; }
+  if (!currentDrawerUid) { toast('No user selected'); return; }
+  const user = usersCache.find(u => u.uid === currentDrawerUid);
+
+  // Firebase does not allow setting another user's password from the client SDK.
+  // We store the hashed temp password indicator in Firestore and use a recovery
+  // code mechanism. For a true direct reset, use Firebase Admin SDK (Cloud Function).
+  // Here we use the recoveryCode field approach: store the raw temp pw encrypted-ish
+  // as a recovery token that index.html checks on login.
+  // Best UX: store it as a recovery code the user pastes, or use Admin SDK.
+  // We store it as a plaintext recoveryCode (only visible to admin, expires 1h).
+  const expiry = new Date(Date.now() + 60 * 60 * 1000);
+  try {
+    await setDoc(doc(db, 'hosts', currentDrawerUid), {
+      recoveryCode: pw,
+      recoveryExpiry: expiry.toISOString()
+    }, { merge: true });
+    const result = document.getElementById('tempPwResult');
+    const val = document.getElementById('tempPwValue');
+    if (result) result.style.display = 'block';
+    if (val) val.textContent = pw;
+    document.getElementById('dTempPassword').value = '';
+    logChange({ type: 'temp_password', uid: currentDrawerUid, username: user?.username,
+      label: 'Temp password set for @' + (user?.username || currentDrawerUid),
+      oldVal: '[previous]', newVal: '[temp pw stored as recovery code]', committed: true });
+    toast('Password stored as recovery code. User can log in with it once.');
+  } catch(e) { toast('Failed: ' + e.message); }
+};
+
+window.swGenerateTempPassword = function() {
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$';
+  let pw = '';
+  for (let i = 0; i < 12; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+  const inp = document.getElementById('dTempPassword');
+  if (inp) { inp.value = pw; inp.type = 'text'; }
+};
+
+// ==============================
+//  SHARED UTILS
+// ==============================
+function escHtml(s) {<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -189,10 +235,12 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .drawer-actions { display: flex; flex-direction: column; gap: 8px; }
 
 /* ===== PENDING CHANGES BANNER ===== */
-.pending-banner { display: none; position: sticky; top: 0; z-index: 100; background: rgba(245,200,66,0.08); border-bottom: 1px solid rgba(245,200,66,0.3); padding: 10px 28px; align-items: center; gap: 12px; }
-.pending-banner.show { display: flex; }
-.pending-count { font-size: 0.75rem; font-weight: 800; color: var(--gold); }
+.pending-banner { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 9800; background: rgba(12,9,2,0.97); border-bottom: 2px solid var(--gold); padding: 10px 24px; align-items: center; gap: 12px; box-shadow: 0 4px 24px rgba(245,200,66,0.18); }
+.pending-banner.show { display: flex; animation: bannerSlide 0.22s ease; }
+@keyframes bannerSlide { from { transform: translateY(-100%); opacity:0; } to { transform:none; opacity:1; } }
+.pending-count { font-size: 0.75rem; font-weight: 800; color: var(--gold); white-space: nowrap; }
 .pending-list { flex: 1; font-size: 0.72rem; font-weight: 600; color: var(--text2); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#adminApp.has-banner .main-content { margin-top: 46px; }
 
 /* ===== CHANGE LOG TABLE ===== */
 .log-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; font-family: var(--mono); }
@@ -243,9 +291,6 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .flex-gap { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .scrollable { overflow-y: auto; }
 
-/* ===== TOTP SETUP ===== */
-.totp-setup-box { background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius); padding: 18px; }
-.totp-qr-placeholder { width: 140px; height: 140px; background: var(--surface); border: 2px dashed var(--border2); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; color: var(--text3); text-align: center; margin: 0 auto 14px; }
 
 @media (max-width: 700px) {
   .sidebar { width: 60px; }
@@ -280,26 +325,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
       <button class="gate-btn" onclick="swAdminLogin()" id="gateLoginBtn">Sign In</button>
     </div>
 
-    <!-- Step 3: TOTP -->
-    <div id="gateTotpStep" style="width:100%;display:flex;flex-direction:column;gap:14px;display:none">
-      <div style="text-align:center;font-size:0.82rem;font-weight:700;color:var(--text2);line-height:1.6">
-        🔐 Two-factor authentication<br>
-        <span style="color:var(--text3);font-size:0.72rem">Open your authenticator app and enter the 6-digit code</span>
-      </div>
-      <div class="gate-field">
-        <label>TOTP Code</label>
-        <input type="text" id="gateTotpCode" placeholder="000000" maxlength="6"
-          inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
-          onkeydown="if(event.key==='Enter')swAdminVerifyTotp()"
-          style="letter-spacing:6px;font-size:1.1rem;text-align:center" />
-      </div>
-      <button class="gate-btn" onclick="swAdminVerifyTotp()" id="gateTotpBtn">Verify</button>
-    </div>
-
     <div class="gate-err" id="gateErr"></div>
-    <div class="gate-totp-hint" id="gateHint" style="display:none">
-      First time? After login you'll be guided through setting up your authenticator app.
-    </div>
   </div>
 </div>
 
@@ -500,11 +526,6 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
           </div>
         </div>
 
-        <div class="card mb-4">
-          <div class="card-title">Two-Factor Auth (TOTP)</div>
-          <div id="totpStatus" style="font-size:0.8rem;font-weight:700;margin-bottom:12px"></div>
-          <div id="totpSetupArea"></div>
-        </div>
       </div>
 
       <div class="card">
@@ -565,34 +586,43 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     </div>
   </div>
 
-  <!-- Password management -->
+  <!-- Password reset -->
   <div class="drawer-section">
-    <div class="drawer-section-title">🔑 Password Management</div>
-
-    <!-- View current password -->
+    <!-- Direct temp password -->
     <div style="margin-bottom:14px">
-      <div class="field-label" style="margin-bottom:6px">Current Password</div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <div id="dPasswordDisplay" style="flex:1;background:var(--bg);border:1.5px solid var(--border2);border-radius:var(--radius-sm);padding:8px 12px;font-family:var(--mono);font-size:0.85rem;color:var(--text2);letter-spacing:3px;min-height:36px">
-          ••••••••
+      <div style="font-size:0.72rem;font-weight:700;color:var(--text2);margin-bottom:8px;line-height:1.5">
+        Set a temporary password directly and share it via Discord. User can change it in settings after login.
+      </div>
+      <div class="field-group" style="margin-bottom:8px">
+        <div class="field-label">Temporary Password</div>
+        <div style="position:relative">
+          <input type="password" class="field-input" id="dTempPassword" placeholder="min 8 characters" style="padding-right:38px" />
+          <button type="button"
+            onclick="(function(b){var i=document.getElementById('dTempPassword');i.type=i.type==='password'?'text':'password';b.textContent=i.type==='password'?'show':'hide'})(this)"
+            style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:0.72rem;font-weight:700;color:var(--text3)">show</button>
         </div>
-        <button class="btn btn-ghost btn-sm" id="dPasswordRevealBtn" onclick="swRevealPassword()" title="Show / hide password">👁️</button>
-        <button class="btn btn-ghost btn-sm" onclick="swCopyPassword()" title="Copy to clipboard">📋</button>
       </div>
-      <div id="dPasswordNote" style="font-size:0.65rem;color:var(--text3);margin-top:4px;font-weight:600"></div>
-    </div>
-
-    <!-- Set new password -->
-    <div class="field-group" style="margin-bottom:10px">
-      <div class="field-label">Set New Password</div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input type="text" class="field-input" id="dNewPassword" placeholder="Enter new password…"
-          style="flex:1;font-family:var(--mono)" autocomplete="off" />
-        <button class="btn btn-ghost btn-sm" onclick="swGeneratePassword()" title="Generate random password">🎲</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="swSetTempPassword()">Set Password</button>
+        <button class="btn btn-ghost btn-sm" onclick="swGenerateTempPassword()">Random</button>
       </div>
-      <div style="font-size:0.65rem;color:var(--text3);margin-top:4px;font-weight:600">Min. 8 characters. Will be saved to Firestore — user applies it on next login.</div>
+      <div id="tempPwResult" style="display:none;margin-top:10px;background:var(--bg);border:1.5px dashed var(--green);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:0.65rem;font-weight:800;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px">Password Set - Share Privately</div>
+        <div id="tempPwValue" style="font-size:1.1rem;font-weight:900;font-family:var(--mono);color:var(--green);letter-spacing:2px"></div>
+        <div style="font-size:0.68rem;color:var(--text3);margin-top:4px">Remind user to change it after login</div>
+      </div>
     </div>
-    <button class="btn btn-primary btn-sm" onclick="swSetUserPassword()">💾 Save New Password</button>
+    <div style="border-top:1px dashed var(--border2);padding-top:12px">
+      <div style="font-size:0.72rem;font-weight:700;color:var(--text2);margin-bottom:8px;line-height:1.5">
+        Or generate a one-time recovery code (expires 24h). User enters it on the login screen to reset their password.
+      </div>
+      <div id="recoveryCodeDisplay" style="display:none;background:var(--bg);border:1.5px dashed var(--accent);border-radius:8px;padding:12px;margin-bottom:10px;text-align:center">
+        <div style="font-size:0.65rem;font-weight:800;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px">Recovery Code (share privately)</div>
+        <div id="recoveryCodeValue" style="font-size:1.4rem;font-weight:900;font-family:var(--mono);color:var(--accent);letter-spacing:4px"></div>
+        <div id="recoveryCodeExpiry" style="font-size:0.68rem;color:var(--text3);margin-top:4px"></div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="swGenerateRecoveryCode()">Generate Recovery Code</button>
+    </div>
   </div>
 
   <!-- Leaderboard (premium only) -->
@@ -620,9 +650,8 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 <!-- Firebase SDK -->
 <script type="module">
 import { initializeApp }          from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-         multiFactor, TotpMultiFactorGenerator, getMultiFactorResolver,
-         TotpSecret }             from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, updatePassword }
+                                   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, collection, getDocs, getDoc, doc, setDoc, deleteDoc,
          updateDoc, serverTimestamp, query, orderBy, limit, writeBatch }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -636,7 +665,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "273242276635",
   appId:             "1:273242276635:web:d6de4c21292fc7295b09be"
 };
-const ADMIN_URL_KEY   = "xK9m2pQr7vNs4wJbptmna85482fjjdnzb8"; // ← CHANGE THIS to a long random string
+const ADMIN_URL_KEY   = "SW_ADMIN_2024_CHANGEME"; // ← CHANGE THIS to a long random string
 const DISCORD_URL     = "https://discord.gg/DhDzyC94mV";
 
 // ── Init Firebase ──
@@ -660,8 +689,7 @@ const db     = getFirestore(fbApp);
 //  STATE
 // ══════════════════════════════════════════════════════════════
 let adminUser       = null;
-let isAdminVerified = false;   // true after TOTP confirmed
-let mfaResolver     = null;    // stored during MFA challenge
+
 let usersCache      = [];      // [{uid, ...hostData}]
 let lbCache         = {};      // uid → {players, lastSynced}
 let pendingChanges  = [];      // [{uid, field, oldVal, newVal, type}]
@@ -740,6 +768,7 @@ function renderPendingBanner() {
   const btn    = document.getElementById('pushAllBtn');
   const n = pendingChanges.length;
   banner.classList.toggle('show', n > 0);
+  document.getElementById('adminApp')?.classList.toggle('has-banner', n > 0);
   count.textContent = n + ' pending change' + (n !== 1 ? 's' : '');
   list.textContent = pendingChanges.map(c => c.label || c.field).join(' · ');
   badge.textContent = n > 0 ? n : '0';
@@ -758,18 +787,9 @@ onAuthStateChanged(auth, async (user) => {
         toast('⛔ Not an admin account'); await signOut(auth); return;
       }
       adminUser = { uid: user.uid, email: user.email, displayName: snap.data().displayName || user.email };
-      // TOTP: if user has MFA enrolled we need TOTP step
-      const mfaInfo = multiFactor(user).enrolledFactors;
-      if (mfaInfo.length === 0) {
-        // No TOTP enrolled yet — show app and prompt to enroll
-        isAdminVerified = true;
-        finishLogin();
-      }
-      // If MFA required, onAuthStateChanged will NOT fire again — see signIn flow
+      finishLogin();
     } catch(e) {
-      if (e.code !== 'auth/multi-factor-auth-required') {
-        setGateErr('Admin check failed: ' + e.message);
-      }
+      setGateErr('Admin check failed: ' + e.message);
     }
   }
 });
@@ -787,48 +807,15 @@ window.swAdminLogin = async function() {
     // If MFA required: caught below
     finishLogin(); // fallback for no-MFA case
   } catch(e) {
-    if (e.code === 'auth/multi-factor-auth-required') {
-      mfaResolver = getMultiFactorResolver(auth, e);
-      // Show TOTP input
-      document.getElementById('gateLoginStep').style.display = 'none';
-      document.getElementById('gateTotpStep').style.display = 'flex';
-      document.getElementById('gateTotpCode').focus();
-    } else {
-      const msg = (e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password')
-        ? '✗ Wrong email or password'
-        : '✗ ' + (e.message || e.code);
-      setGateErr(msg);
-    }
+    const msg = (e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password')
+      ? '✗ Wrong email or password'
+      : '✗ ' + (e.message || e.code);
+    setGateErr(msg);
   }
   btn.disabled = false; btn.textContent = 'Sign In';
 };
 
-window.swAdminVerifyTotp = async function() {
-  const code = document.getElementById('gateTotpCode').value.trim();
-  if (code.length !== 6) { setGateErr('Enter the 6-digit code'); return; }
-  if (!mfaResolver) { setGateErr('Session expired, please reload'); return; }
-  const btn = document.getElementById('gateTotpBtn');
-  btn.disabled = true; btn.textContent = 'Verifying…';
-  setGateErr('');
-  try {
-    const assertion = TotpMultiFactorGenerator.assertionForSignIn(
-      mfaResolver.hints[0].uid, code
-    );
-    const cred = await mfaResolver.resolveSignIn(assertion);
-    adminUser = { uid: cred.user.uid, email: cred.user.email };
-    isAdminVerified = true;
-    // Check admin doc
-    const snap = await getDoc(doc(db, 'admins', cred.user.uid));
-    if (!snap.exists() || snap.data().isAdmin !== true) {
-      toast('⛔ Not an admin account'); await signOut(auth); return;
-    }
-    adminUser.displayName = snap.data().displayName || cred.user.email;
-    finishLogin();
-  } catch(e) {
-    setGateErr('✗ Invalid TOTP code');
-  }
-  btn.disabled = false; btn.textContent = 'Verify';
-};
+
 
 function finishLogin() {
   if (!auth.currentUser) return;
@@ -950,6 +937,10 @@ window.swOpenDrawer = function(uid) {
   // Show leaderboard section for premium
   document.getElementById('drawerLbSection').style.display = user.isPremium ? 'block' : 'none';
   document.getElementById('drawerLbContent').innerHTML = '<div class="empty-state" style="padding:10px">Click Load to fetch</div>';
+  document.getElementById('recoveryCodeDisplay').style.display = 'none';
+  const tpr = document.getElementById('tempPwResult'); if (tpr) tpr.style.display = 'none';
+  const dtp = document.getElementById('dTempPassword'); if (dtp) { dtp.value = ''; dtp.type = 'password'; }
+
   document.getElementById('drawerBackdrop').classList.add('show');
   document.getElementById('userDrawer').classList.add('open');
 };
@@ -993,98 +984,22 @@ window.swSaveDrawerChanges = function() {
   swCloseDrawer();
 };
 
-// ── Password management helpers ──
-let _drawerPasswordRevealed = false;
-let _drawerPasswordValue    = '';   // plaintext as stored in Firestore
-
-window.swOpenDrawer = (function(_orig) {
-  return function(uid) {
-    _orig(uid);
-    // Reset password panel state whenever drawer opens
-    _drawerPasswordRevealed = false;
-    _drawerPasswordValue    = '';
-    const display = document.getElementById('dPasswordDisplay');
-    const note    = document.getElementById('dPasswordNote');
-    const revBtn  = document.getElementById('dPasswordRevealBtn');
-    const newInp  = document.getElementById('dNewPassword');
-    if (display) display.textContent = '••••••••';
-    if (note)    note.textContent    = '';
-    if (revBtn)  revBtn.textContent  = '👁️';
-    if (newInp)  newInp.value        = '';
-
-    // Fetch stored password from Firestore
-    const user = usersCache.find(u => u.uid === uid);
-    if (user) {
-      getDoc(doc(db, 'hosts', uid)).then(snap => {
-        if (snap.exists()) {
-          const data = snap.data();
-          _drawerPasswordValue = data.adminSetPassword || '';
-          if (note) note.textContent = _drawerPasswordValue
-            ? 'Password stored in Firestore ✓'
-            : 'No admin-set password on record';
-        }
-      }).catch(() => {});
-    }
-  };
-})(window.swOpenDrawer);
-
-window.swRevealPassword = function() {
-  _drawerPasswordRevealed = !_drawerPasswordRevealed;
-  const display = document.getElementById('dPasswordDisplay');
-  const btn     = document.getElementById('dPasswordRevealBtn');
-  if (!display) return;
-  if (_drawerPasswordRevealed) {
-    display.textContent = _drawerPasswordValue || '(no password set)';
-    display.style.letterSpacing = '1px';
-    display.style.color = 'var(--text)';
-    btn.textContent = '🙈';
-  } else {
-    display.textContent = '••••••••';
-    display.style.letterSpacing = '3px';
-    display.style.color = 'var(--text2)';
-    btn.textContent = '👁️';
-  }
-};
-
-window.swCopyPassword = function() {
-  if (!_drawerPasswordValue) { toast('No password stored yet'); return; }
-  navigator.clipboard.writeText(_drawerPasswordValue)
-    .then(() => toast('📋 Password copied to clipboard'))
-    .catch(() => toast('Copy failed — check browser permissions'));
-};
-
-window.swGeneratePassword = function() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$';
-  let pw = '';
-  for (let i = 0; i < 12; i++) pw += chars[Math.floor(Math.random() * chars.length)];
-  const inp = document.getElementById('dNewPassword');
-  if (inp) inp.value = pw;
-};
-
-window.swSetUserPassword = async function() {
+window.swGenerateRecoveryCode = async function() {
   if (!currentDrawerUid) return;
-  const inp = document.getElementById('dNewPassword');
-  const pw  = (inp?.value || '').trim();
-  if (!pw) { toast('⚠️ Enter a new password first'); return; }
-  if (pw.length < 8) { toast('⚠️ Password must be at least 8 characters'); return; }
   const user = usersCache.find(u => u.uid === currentDrawerUid);
+  const code   = generateCode(8);
+  const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
   try {
     await setDoc(doc(db, 'hosts', currentDrawerUid), {
-      adminSetPassword: pw,
-      adminSetPasswordAt: new Date().toISOString()
+      recoveryCode: code,
+      recoveryExpiry: expiry.toISOString()
     }, { merge: true });
-    _drawerPasswordValue = pw;
-    const note = document.getElementById('dPasswordNote');
-    if (note) note.textContent = 'Password stored in Firestore ✓';
-    if (inp) inp.value = '';
-    // If currently revealed, update display
-    if (_drawerPasswordRevealed) {
-      const display = document.getElementById('dPasswordDisplay');
-      if (display) display.textContent = pw;
-    }
-    logChange({ type: 'password_set', uid: currentDrawerUid, username: user?.username,
-      label: `Password set for @${user?.username}`, oldVal:'[old]', newVal:'[new pw]', committed:true });
-    toast('🔑 New password saved to Firestore');
+    document.getElementById('recoveryCodeDisplay').style.display = 'block';
+    document.getElementById('recoveryCodeValue').textContent = code;
+    document.getElementById('recoveryCodeExpiry').textContent = 'Expires: ' + expiry.toLocaleString();
+    logChange({ type: 'recovery_code', uid: currentDrawerUid, username: user?.username,
+      label: `Recovery code generated for @${user?.username}`, oldVal:'—', newVal:'[CODE]', committed:true });
+    toast('🔑 Recovery code generated and saved to Firestore');
   } catch(e) { toast('✗ Failed: ' + e.message); }
 };
 
@@ -1135,8 +1050,32 @@ window.swDeleteUserFromDrawer = async function() {
 };
 
 // ══════════════════════════════════════════════════════════════
-//  PENDING CHANGES → PUSH  (full implementation below, after LB helpers)
+//  PENDING CHANGES → PUSH
 // ══════════════════════════════════════════════════════════════
+window.swPushChanges = async function() {
+  if (!pendingChanges.length) { toast('No pending changes'); return; }
+  const btn = document.getElementById('pushAllBtn');
+  if (btn) btn.disabled = true;
+  let pushed = 0, failed = 0;
+  for (const change of pendingChanges) {
+    try {
+      await setDoc(doc(db, 'hosts', change.uid), { [change.field]: change.newVal }, { merge: true });
+      // Sync to local cache
+      const cached = usersCache.find(u => u.uid === change.uid);
+      if (cached) cached[change.field] = change.newVal;
+      logChange({ ...change, committed: true });
+      pushed++;
+    } catch(e) {
+      toast(`✗ Failed to push ${change.field} for ${change.uid}: ${e.message}`);
+      failed++;
+    }
+  }
+  pendingChanges = [];
+  renderPendingBanner();
+  swFilterUsers();
+  toast(`✅ Pushed ${pushed} change${pushed !== 1 ? 's' : ''}${failed ? ` (${failed} failed)` : ''}`);
+  if (btn) btn.disabled = false;
+};
 
 window.swDiscardChanges = function() {
   if (!pendingChanges.length) return;
@@ -1353,24 +1292,23 @@ window.swQueueLbChanges = function(uid) {
   toast('✅ LB changes queued — push from Change Log or banner');
 };
 
-// ══════════════════════════════════════════════════════════════
-//  PUSH ALL PENDING CHANGES (handles host edits + LB saves)
-// ══════════════════════════════════════════════════════════════
+// Override swPushChanges to handle LB saves too
+const _origPush = window.swPushChanges;
 window.swPushChanges = async function() {
   if (!pendingChanges.length) { toast('No pending changes'); return; }
   const btn = document.getElementById('pushAllBtn');
   if (btn) btn.disabled = true;
   let pushed = 0, failed = 0;
-  for (const change of [...pendingChanges]) {
+  for (const change of pendingChanges) {
     try {
       if (change._lbUid && change._lbData) {
-        // Leaderboard full save
+        // Leaderboard save
         await setDoc(doc(db, 'leaderboards', change._lbUid), {
           players: change._lbData.players,
           lastSynced: serverTimestamp()
         });
       } else if (change._lbUid && change.field === 'players' && !change._lbData) {
-        // Leaderboard remove-only — rebuild from cache
+        // Remove-only (no _lbData) — rebuild from cache
         const cached = lbCache[change._lbUid];
         if (cached) await setDoc(doc(db, 'leaderboards', change._lbUid), {
           players: cached.players || [],
@@ -1403,79 +1341,13 @@ window.swLoadSecurity = function() {
   if (!adminUser) return;
   document.getElementById('secAdminEmail').value       = adminUser.email || '';
   document.getElementById('secAdminDisplayName').value = adminUser.displayName || '';
-  const user = auth.currentUser;
-  const mfaFactors = user ? multiFactor(user).enrolledFactors : [];
-  const totpEl = document.getElementById('totpStatus');
-  const totpArea = document.getElementById('totpSetupArea');
-  if (mfaFactors.length > 0) {
-    totpEl.innerHTML = '<span style="color:var(--green)">✅ TOTP is active</span>';
-    totpArea.innerHTML = `<div style="font-size:0.78rem;font-weight:600;color:var(--text2)">Authenticator app enrolled.<br>Factor UID: <span style="font-family:var(--mono);color:var(--text3)">${mfaFactors[0].uid}</span></div>
-      <button class="btn btn-danger btn-sm" style="margin-top:10px" onclick="swUnenrollTotp()">⚠️ Remove 2FA</button>`;
-  } else {
-    totpEl.innerHTML = '<span style="color:var(--orange)">⚠️ TOTP not enrolled</span>';
-    totpArea.innerHTML = `<div style="font-size:0.78rem;font-weight:600;color:var(--text2);margin-bottom:10px;line-height:1.6">
-      No authenticator app enrolled. Click below to start setup.</div>
-      <button class="btn btn-primary btn-sm" onclick="swEnrollTotp()">🔐 Enrol Authenticator App</button>
-      <div id="totpEnrolArea" style="margin-top:14px"></div>`;
-  }
 };
 
-window.swEnrollTotp = async function() {
-  const user = auth.currentUser;
-  if (!user) return;
-  const area = document.getElementById('totpEnrolArea');
-  area.innerHTML = '<div class="spinner"></div>';
-  try {
-    const session  = await multiFactor(user).getSession();
-    const totpSecret = await TotpMultiFactorGenerator.generateSecret(session);
-    const qrUrl    = totpSecret.generateQrCodeUrl(user.email || 'admin', 'StreamWheel Admin');
-    area.innerHTML = `
-      <div class="totp-setup-box">
-        <div style="font-size:0.75rem;font-weight:700;color:var(--text2);margin-bottom:10px;line-height:1.6">
-          1. Open <strong>Google Authenticator</strong> or <strong>Authy</strong><br>
-          2. Scan the QR code or enter the key manually<br>
-          3. Enter the 6-digit code below to confirm
-        </div>
-        <div style="text-align:center;margin-bottom:14px">
-          <img src="${qrUrl}" width="140" height="140" style="border-radius:8px;background:#fff;padding:6px" alt="TOTP QR" onerror="this.style.display='none';document.getElementById('totpManualKey').style.display='block'" />
-          <div id="totpManualKey" style="display:none;font-family:var(--mono);font-size:0.75rem;word-break:break-all;color:var(--accent);margin-top:6px">${totpSecret.secretKey}</div>
-          <div style="font-size:0.68rem;color:var(--text3);margin-top:6px">Can't scan? Use key above</div>
-        </div>
-        <div class="field-group">
-          <div class="field-label">Verification Code</div>
-          <input type="text" class="field-input" id="totpVerifyInput" maxlength="6" inputmode="numeric" placeholder="000000" style="letter-spacing:4px;text-align:center;font-size:1rem" />
-        </div>
-        <button class="btn btn-success btn-sm" style="width:100%;margin-top:10px" onclick="swConfirmTotpEnrol()">✅ Confirm & Activate 2FA</button>
-      </div>`;
-    window._totpSecretForEnrol = totpSecret;
-  } catch(e) { area.innerHTML = `<div style="color:var(--red);font-size:0.8rem">${e.message}</div>`; }
-};
 
-window.swConfirmTotpEnrol = async function() {
-  const code = document.getElementById('totpVerifyInput')?.value?.trim();
-  if (!code || code.length !== 6) { toast('Enter the 6-digit code'); return; }
-  const user = auth.currentUser;
-  if (!user || !window._totpSecretForEnrol) return;
-  try {
-    const assertion = TotpMultiFactorGenerator.assertionForEnrollment(window._totpSecretForEnrol, code);
-    await multiFactor(user).enroll(assertion, 'StreamWheel Admin TOTP');
-    window._totpSecretForEnrol = null;
-    toast('🔐 2FA enabled! You will need your authenticator on next login.');
-    swLoadSecurity();
-  } catch(e) { toast('✗ Invalid code or enrollment failed: ' + e.message); }
-};
 
-window.swUnenrollTotp = async function() {
-  const user = auth.currentUser;
-  if (!user) return;
-  if (!confirm('Remove 2FA? Your account will only be protected by email+password.')) return;
-  try {
-    const factors = multiFactor(user).enrolledFactors;
-    await multiFactor(user).unenroll(factors[0]);
-    toast('2FA removed');
-    swLoadSecurity();
-  } catch(e) { toast('✗ ' + e.message); }
-};
+
+
+
 
 window.swUpdateAdminAccount = async function() {
   const displayName = document.getElementById('secAdminDisplayName').value.trim();
@@ -1491,7 +1363,6 @@ window.swUpdateAdminAccount = async function() {
     }
     if (newPw) {
       if (newPw.length < 10) { toast('⚠️ Admin password must be at least 10 characters'); return; }
-      const { updatePassword } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
       await updatePassword(user, newPw);
       document.getElementById('secNewPassword').value = '';
       toast('🔑 Password updated');
@@ -1499,6 +1370,41 @@ window.swUpdateAdminAccount = async function() {
       toast('✅ Profile saved');
     }
   } catch(e) { toast('✗ ' + e.message); }
+};
+
+// ══════════════════════════════════════════════════════════════
+//  USER PASSWORD MANAGEMENT
+// ══════════════════════════════════════════════════════════════
+window.swSetTempPassword = async function() {
+  const pw = (document.getElementById('dTempPassword') || {}).value || '';
+  if (!pw) { toast('Enter a temporary password'); return; }
+  if (pw.length < 8) { toast('Password must be at least 8 characters'); return; }
+  if (!currentDrawerUid) { toast('No user selected'); return; }
+  const user = usersCache.find(u => u.uid === currentDrawerUid);
+  const expiry = new Date(Date.now() + 60 * 60 * 1000);
+  try {
+    await setDoc(doc(db, 'hosts', currentDrawerUid), {
+      recoveryCode: pw,
+      recoveryExpiry: expiry.toISOString()
+    }, { merge: true });
+    const result = document.getElementById('tempPwResult');
+    const val = document.getElementById('tempPwValue');
+    if (result) result.style.display = 'block';
+    if (val) val.textContent = pw;
+    document.getElementById('dTempPassword').value = '';
+    logChange({ type: 'temp_password', uid: currentDrawerUid, username: user?.username,
+      label: 'Temp password set for @' + (user?.username || currentDrawerUid),
+      oldVal: '[previous]', newVal: '[stored as recovery code, expires 1h]', committed: true });
+    toast('Temp password saved. Share it privately — user enters it like a recovery code.');
+  } catch(e) { toast('Failed: ' + e.message); }
+};
+
+window.swGenerateTempPassword = function() {
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$';
+  let pw = '';
+  for (let i = 0; i < 12; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+  const inp = document.getElementById('dTempPassword');
+  if (inp) { inp.value = pw; inp.type = 'text'; }
 };
 
 // ══════════════════════════════════════════════════════════════
