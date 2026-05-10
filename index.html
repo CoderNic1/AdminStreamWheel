@@ -425,7 +425,10 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
           <div class="page-title">🏅 <span>Leaderboards</span></div>
           <div class="page-sub">Premium user leaderboards — expand to view and edit</div>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="swLoadLeaderboards()">🔄 Refresh</button>
+        <div class="flex-gap">
+          <button class="btn btn-ghost btn-sm" onclick="swOpenMigrateModal()" title="Copy leaderboard data from one user to another">🔀 Migrate LB Data</button>
+          <button class="btn btn-ghost btn-sm" onclick="swLoadLeaderboards()">🔄 Refresh</button>
+        </div>
       </div>
       <div id="lbContainer">
         <div class="empty-state"><div class="empty-icon">🏅</div>Loading leaderboards…</div>
@@ -546,21 +549,6 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     </div>
   </div>
 
-  <!-- Password reset — recovery code only -->
-  <div class="drawer-section">
-    <div class="drawer-section-title">🔑 Password Reset</div>
-    <div style="font-size:0.72rem;font-weight:700;color:var(--text2);margin-bottom:10px;line-height:1.6">
-      Generates a one-time recovery code stored in Firestore (expires 24h). Share it privately with the user via Discord — they enter it on the login screen to set a new password.
-    </div>
-    <div id="recoveryCodeDisplay" style="display:none;background:var(--bg);border:1.5px dashed var(--accent);border-radius:8px;padding:14px;margin-bottom:10px;text-align:center">
-      <div style="font-size:0.6rem;font-weight:800;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px">Recovery Code — Share Privately</div>
-      <div id="recoveryCodeValue" style="font-size:1.6rem;font-weight:900;font-family:var(--mono);color:var(--accent);letter-spacing:6px;margin-bottom:4px"></div>
-      <div id="recoveryCodeExpiry" style="font-size:0.68rem;color:var(--text3)"></div>
-      <button class="btn btn-ghost btn-sm" style="margin-top:8px;font-size:0.68rem" onclick="navigator.clipboard.writeText(document.getElementById('recoveryCodeValue').textContent).then(()=>toast('Copied!'))">📋 Copy Code</button>
-    </div>
-    <button class="btn btn-primary btn-sm" onclick="swGenerateRecoveryCode()">🔑 Generate Recovery Code</button>
-  </div>
-
   <!-- Leaderboard (premium only) -->
   <div class="drawer-section" id="drawerLbSection" style="display:none">
     <div class="drawer-section-title">🏅 Leaderboard</div>
@@ -580,6 +568,35 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   <div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:4px;border-top:1px solid var(--border)">
     <button class="btn btn-primary" style="flex:1" onclick="swSaveDrawerChanges()">💾 Queue Changes</button>
     <button class="btn btn-ghost" style="flex:1" onclick="swCloseDrawer()">Cancel</button>
+  </div>
+</div>
+
+<!-- ===== MIGRATE LEADERBOARD MODAL ===== -->
+<div class="swl-modal-backdrop" id="migrateModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9000;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--radius);width:100%;max-width:460px;display:flex;flex-direction:column;box-shadow:0 32px 80px rgba(0,0,0,0.6)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px 14px;border-bottom:1px solid var(--border)">
+      <div style="font-weight:900;font-size:1rem;color:var(--text)">🔀 Migrate Leaderboard Data</div>
+      <button onclick="swCloseMigrateModal()" style="background:var(--surface);border:1px solid var(--border2);color:var(--text2);border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:0.9rem">✕</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
+      <div style="background:rgba(255,77,109,0.08);border:1.5px solid rgba(255,77,109,0.3);border-radius:8px;padding:10px 12px;font-size:0.78rem;font-weight:700;color:var(--text2);line-height:1.6">
+        ⚠️ This copies leaderboard data from one user to another and <strong>overwrites</strong> the destination's existing leaderboard. The source leaderboard is not deleted. This cannot be undone.
+      </div>
+      <div class="field-group">
+        <div class="field-label">From (Source username)</div>
+        <select class="field-input" id="migrateFrom" style="cursor:pointer"></select>
+      </div>
+      <div style="text-align:center;font-size:1.2rem;color:var(--text3)">↓</div>
+      <div class="field-group">
+        <div class="field-label">To (Destination username)</div>
+        <select class="field-input" id="migrateTo" style="cursor:pointer"></select>
+      </div>
+      <div id="migratePreview" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:0.75rem;font-weight:700;color:var(--text2)"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-danger" style="flex:1" onclick="swConfirmMigrate()">🔀 Migrate</button>
+        <button class="btn btn-ghost" style="flex:1" onclick="swCloseMigrateModal()">Cancel</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -672,13 +689,6 @@ function inactiveDaysColor(days) {
   if (days <= 14) return '#f5c842';
   if (days <= 30) return '#ff8c42';
   return '#ff4d6d';
-}
-
-function generateCode(len=8) {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < len; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
 }
 
 function logChange(entry) {
@@ -873,7 +883,6 @@ window.swOpenDrawer = function(uid) {
   // Show leaderboard section for premium
   document.getElementById('drawerLbSection').style.display = user.isPremium ? 'block' : 'none';
   document.getElementById('drawerLbContent').innerHTML = '<div class="empty-state" style="padding:10px">Click Load to fetch</div>';
-  document.getElementById('recoveryCodeDisplay').style.display = 'none';
 
   document.getElementById('drawerBackdrop').classList.add('show');
   document.getElementById('userDrawer').classList.add('open');
@@ -918,25 +927,6 @@ window.swSaveDrawerChanges = function() {
   swCloseDrawer();
 };
 
-window.swGenerateRecoveryCode = async function() {
-  if (!currentDrawerUid) return;
-  const user = usersCache.find(u => u.uid === currentDrawerUid);
-  const code   = generateCode(8);
-  const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  try {
-    await setDoc(doc(db, 'hosts', currentDrawerUid), {
-      recoveryCode: code,
-      recoveryExpiry: expiry.toISOString()
-    }, { merge: true });
-    document.getElementById('recoveryCodeDisplay').style.display = 'block';
-    document.getElementById('recoveryCodeValue').textContent = code;
-    document.getElementById('recoveryCodeExpiry').textContent = 'Expires: ' + expiry.toLocaleString();
-    logChange({ type: 'recovery_code', uid: currentDrawerUid, username: user?.username,
-      label: `Recovery code generated for @${user?.username}`, oldVal:'—', newVal:'[CODE]', committed:true });
-    toast('🔑 Recovery code generated and saved to Firestore');
-  } catch(e) { toast('✗ Failed: ' + e.message); }
-};
-
 window.swLoadDrawerLb = async function() {
   if (!currentDrawerUid) return;
   const el = document.getElementById('drawerLbContent');
@@ -964,22 +954,49 @@ window.swLoadDrawerLb = async function() {
 window.swDeleteUserFromDrawer = async function() {
   if (!currentDrawerUid) return;
   const user = usersCache.find(u => u.uid === currentDrawerUid);
-  if (!confirm(`Delete @${user?.username}'s entire account and cloud data? This cannot be undone.`)) return;
+  if (!confirm(`Delete @${user?.username}'s entire account and all cloud data? This cannot be undone.`)) return;
   if (!confirm('Final confirmation — are you absolutely sure?')) return;
   try {
+    // Delete Firestore data first (batch)
     const batch = writeBatch(db);
     batch.delete(doc(db, 'hosts', currentDrawerUid));
     batch.delete(doc(db, 'leaderboards', currentDrawerUid));
     await batch.commit();
-    // Note: Firebase Auth user deletion requires Admin SDK server-side.
-    // The Firestore data is deleted. Auth account can be removed from Firebase Console.
+
+    // Delete Firebase Auth account using the Admin REST API
+    // This requires your Firebase Web API key and the user's ID token — but we
+    // can only delete the *current* user via client SDK. For other users we use
+    // the Identity Toolkit REST API with the admin's credential.
+    // Since we have no server, we delete via the accounts:delete endpoint using
+    // the target user's uid and our project's API key.
+    // NOTE: This only works if you enable "Identity Toolkit API" in Google Cloud Console.
+    const apiKey = FIREBASE_CONFIG.apiKey;
+    // Get a fresh ID token from the current admin user to authenticate the call
+    const adminToken = await auth.currentUser.getIdToken(true);
+    const res = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // We cannot delete other users via the client REST API without their token.
+        // Flag this clearly so admin knows to also delete from console.
+        body: JSON.stringify({ localId: currentDrawerUid })
+      }
+    );
+    // The client REST API requires the user's own ID token, not the admin's.
+    // If it fails (which it will for other users), instruct admin to delete from console.
+    if (!res.ok) {
+      toast('⚠️ Firestore data deleted. Delete the Auth entry manually in Firebase Console → Authentication → Users.');
+    } else {
+      toast('🗑️ Account fully deleted (Firestore + Auth)');
+    }
+
     usersCache = usersCache.filter(u => u.uid !== currentDrawerUid);
     logChange({ type: 'delete_user', uid: currentDrawerUid, username: user?.username,
-      label: `Deleted account + LB data for @${user?.username}`, oldVal:'exists', newVal:'deleted', committed:true });
+      label: `Deleted @${user?.username} — Firestore data removed`, oldVal: 'exists', newVal: 'deleted', committed: true });
     document.getElementById('navBadgeUsers').textContent = usersCache.length;
     swFilterUsers();
     swCloseDrawer();
-    toast('🗑️ Firestore data deleted. Remove Auth entry from Firebase Console if needed.');
   } catch(e) { toast('✗ Delete failed: ' + e.message); }
 };
 
@@ -1338,6 +1355,67 @@ window.swClearOldLogs = function() {
   localStorage.setItem('sw_admin_log', JSON.stringify(changeLog));
   renderChangelog();
   toast('🧹 Removed ' + removed + ' old log entr' + (removed === 1 ? 'y' : 'ies'));
+};
+
+// ══════════════════════════════════════════════════════════════
+//  MIGRATE LEADERBOARD
+// ══════════════════════════════════════════════════════════════
+window.swOpenMigrateModal = function() {
+  const modal = document.getElementById('migrateModal');
+  if (!modal) return;
+  // Populate selects with premium users who have leaderboards
+  const premUsers = usersCache.filter(u => u.isPremium);
+  if (premUsers.length < 2) { toast('Need at least 2 premium users to migrate'); return; }
+  const opts = premUsers.map(u => `<option value="${escHtml(u.uid)}">${escHtml('@' + (u.username || u.uid.slice(0,8)))}</option>`).join('');
+  document.getElementById('migrateFrom').innerHTML = opts;
+  document.getElementById('migrateTo').innerHTML   = opts;
+  // Default to different selections
+  if (premUsers.length >= 2) document.getElementById('migrateTo').selectedIndex = 1;
+  document.getElementById('migratePreview').style.display = 'none';
+  modal.style.display = 'flex';
+};
+
+window.swCloseMigrateModal = function() {
+  const modal = document.getElementById('migrateModal');
+  if (modal) modal.style.display = 'none';
+};
+
+window.swConfirmMigrate = async function() {
+  const fromUid = document.getElementById('migrateFrom').value;
+  const toUid   = document.getElementById('migrateTo').value;
+  if (fromUid === toUid) { toast('Source and destination must be different users'); return; }
+  const fromUser = usersCache.find(u => u.uid === fromUid);
+  const toUser   = usersCache.find(u => u.uid === toUid);
+  if (!confirm(`Copy @${fromUser?.username}'s leaderboard TO @${toUser?.username}?\n\nThis OVERWRITES @${toUser?.username}'s existing leaderboard. Cannot be undone.`)) return;
+
+  try {
+    // Fetch source leaderboard
+    const srcSnap = await getDoc(doc(db, 'leaderboards', fromUid));
+    if (!srcSnap.exists()) { toast('✗ Source user has no leaderboard data'); return; }
+    const srcData = srcSnap.data();
+
+    // Write to destination
+    await setDoc(doc(db, 'leaderboards', toUid), {
+      players:    srcData.players || [],
+      lastSynced: serverTimestamp()
+    });
+
+    // Update local cache
+    lbCache[toUid] = { ...srcData, lastSynced: new Date() };
+
+    logChange({
+      type: 'migrate_lb', uid: toUid,
+      username: toUser?.username,
+      label: `LB migrated from @${fromUser?.username} → @${toUser?.username}`,
+      oldVal: '[previous LB]',
+      newVal: `[${(srcData.players || []).length} players from @${fromUser?.username}]`,
+      committed: true
+    });
+
+    swCloseMigrateModal();
+    toast(`✅ Leaderboard migrated from @${fromUser?.username} to @${toUser?.username}`);
+    swLoadLeaderboards(); // refresh view
+  } catch(e) { toast('✗ Migration failed: ' + e.message); }
 };
 
 // ══════════════════════════════════════════════════════════════
