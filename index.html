@@ -205,6 +205,17 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .log-new { color: var(--green); }
 .log-pending { color: var(--gold); }
 .log-committed { color: var(--text3); }
+.log-select-cell { width: 36px; text-align: center; }
+.log-select-cell input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+/* ===== TODOS ===== */
+.todo-list { display: flex; flex-direction: column; gap: 10px; }
+.todo-item { display: flex; align-items: flex-start; gap: 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; }
+.todo-item.done { opacity: 0.65; border-color: rgba(62,207,142,0.35); }
+.todo-item input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--green); cursor: pointer; margin-top: 2px; flex-shrink: 0; }
+.todo-body { flex: 1; min-width: 0; }
+.todo-title { font-size: 0.85rem; font-weight: 700; color: var(--text); line-height: 1.45; }
+.todo-meta { font-size: 0.65rem; font-weight: 600; color: var(--text3); font-family: var(--mono); margin-top: 6px; }
 
 /* ===== LEADERBOARD TABLE ===== */
 .lb-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
@@ -314,6 +325,9 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
     <div class="sidebar-section-label">Admin</div>
     <div class="nav-item" onclick="swNavTo('changelog')" data-page="changelog">
       <span class="nav-icon">📋</span><span>Change Log</span><span class="nav-badge" id="navBadgePending">0</span>
+    </div>
+    <div class="nav-item" onclick="swNavTo('todos')" data-page="todos">
+      <span class="nav-icon">✅</span><span>Follow-ups</span><span class="nav-badge" id="navBadgeTodos">0</span>
     </div>
     <div class="nav-item" onclick="swNavTo('security')" data-page="security">
       <span class="nav-icon">🔐</span><span>Security</span>
@@ -445,18 +459,32 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
         <div class="flex-gap">
           <button class="btn btn-gold btn-sm" onclick="swPushChanges()" id="pushAllBtn">☁️ Push Pending Changes</button>
           <button class="btn btn-ghost btn-sm" onclick="swDiscardChanges()">✕ Discard Pending</button>
-          <button class="btn btn-ghost btn-sm" onclick="swClearOldLogs()" title="Remove committed log entries older than 30 days">🧹 Clear Old Logs</button>
+          <button class="btn btn-ghost btn-sm" onclick="swOpenLogPurgeModal()" title="Pick committed log entries older than 7 days, preview, then delete">🧹 Remove old logs…</button>
         </div>
       </div>
       <div class="card">
         <div id="changelogStatsBar" style="font-size:0.72rem;font-weight:700;color:var(--text3);margin-bottom:12px;display:flex;gap:16px;flex-wrap:wrap">
           <span>Total entries: <strong id="logStatTotal" style="color:var(--text)">0</strong></span>
-          <span>Older than 30d: <strong id="logStatOld" style="color:var(--orange)">0</strong></span>
+          <span>Eligible (7d+): <strong id="logStatOld" style="color:var(--orange)">0</strong></span>
           <span>localStorage used: <strong id="logStatSize" style="color:var(--text2)">—</strong></span>
         </div>
         <div id="changelogTableWrap">
           <div class="empty-state"><div class="empty-icon">📋</div>No changes yet.</div>
         </div>
+      </div>
+    </div>
+
+    <!-- ── FOLLOW-UPS (TODOS) PAGE ── -->
+    <div class="page" id="page-todos">
+      <div class="page-header">
+        <div>
+          <div class="page-title">✅ <span>Follow-ups</span></div>
+          <div class="page-sub">Manual tasks (e.g. after account removal). Checked items older than 7 days are removed automatically.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Open tasks</div>
+        <div id="todosContainer"><div class="empty-state" style="padding:20px">Loading…</div></div>
       </div>
     </div>
 
@@ -600,12 +628,39 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   </div>
 </div>
 
+<!-- ===== LOG PURGE MODAL ===== -->
+<div class="swl-modal-backdrop" id="logPurgeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:9100;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--radius);width:100%;max-width:640px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 32px 80px rgba(0,0,0,0.6)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px 14px;border-bottom:1px solid var(--border)">
+      <div style="font-weight:900;font-size:1rem;color:var(--text)">🧹 Remove log entries</div>
+      <button type="button" onclick="swCloseLogPurgeModal()" style="background:var(--surface);border:1px solid var(--border2);color:var(--text2);border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:0.9rem">✕</button>
+    </div>
+    <div style="padding:16px 20px 0;font-size:0.75rem;font-weight:700;color:var(--text2);line-height:1.55">
+      Only committed or discarded rows <strong style="color:var(--orange)">older than 7 days</strong> can be removed. Select rows, preview, then confirm. Pending rows in the table are not stored here until pushed.
+    </div>
+    <div style="padding:12px 20px;display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="swLogPurgeSelectAll()">Select all listed</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="swLogPurgeSelectNone()">Clear selection</button>
+      <span id="logPurgeSelectedCount" style="margin-left:auto;font-size:0.72rem;font-weight:800;color:var(--gold);align-self:center">0 selected</span>
+    </div>
+    <div id="logPurgeList" class="scrollable" style="padding:12px 20px;flex:1;min-height:120px;max-height:38vh;font-size:0.78rem"></div>
+    <div style="padding:12px 20px;border-top:1px solid var(--border)">
+      <button type="button" class="btn btn-ghost btn-sm" style="width:100%;margin-bottom:8px" onclick="swLogPurgeTogglePreview()"><span id="logPurgePreviewBtnLabel">👁 Show preview</span></button>
+      <pre id="logPurgePreview" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:0.68rem;color:var(--text2);white-space:pre-wrap;max-height:160px;overflow-y:auto;margin-bottom:12px"></pre>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="btn btn-danger" style="flex:1" onclick="swLogPurgeConfirm()">🗑️ Delete selected</button>
+        <button type="button" class="btn btn-ghost" style="flex:1" onclick="swCloseLogPurgeModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Firebase SDK -->
 <script type="module">
 import { initializeApp }          from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, updatePassword }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { getFirestore, collection, getDocs, getDoc, doc, setDoc, deleteDoc,
+import { getFirestore, collection, getDocs, getDocsFromServer, getDoc, getDocFromServer, doc, setDoc, deleteDoc,
          updateDoc, serverTimestamp, query, orderBy, limit, writeBatch }
                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
@@ -618,7 +673,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "273242276635",
   appId:             "1:273242276635:web:d6de4c21292fc7295b09be"
 };
-const ADMIN_URL_KEY   = "xK9m2pQr7vNs4wJbptmna85482fjjdnzb8"; // ← CHANGE THIS to a long random string
+const ADMIN_URL_KEY   = "xK9m2pQr7vNs4wJbptmna85482fjjdnzb8";
 const DISCORD_URL     = "https://discord.gg/DhDzyC94mV";
 
 // ── Init Firebase ──
@@ -647,9 +702,15 @@ let usersCache      = [];      // [{uid, ...hostData}]
 let lbCache         = {};      // uid → {players, lastSynced}
 let pendingChanges  = [];      // [{uid, field, oldVal, newVal, type}]
 let changeLog       = JSON.parse(localStorage.getItem('sw_admin_log') || '[]');
+let adminTodos      = [];
 let currentDrawerUid = null;
 let drawerEdits      = {};
 let sessionStart     = new Date().toLocaleString();
+
+const LOG_PURGE_MIN_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const TODO_DONE_PRUNE_MS   = 7 * 24 * 60 * 60 * 1000;
+let logPurgeSelected       = new Set();
+let logPurgePreviewVisible = false;
 
 // ══════════════════════════════════════════════════════════════
 //  HELPERS
@@ -668,6 +729,8 @@ function showApp() {
   const app = document.getElementById('adminApp');
   app.classList.add('show');
   document.getElementById('sessionStart').textContent = sessionStart;
+  loadAdminTodos();
+  renderTodoNavBadge();
   swLoadUsers();
 }
 
@@ -691,11 +754,193 @@ function inactiveDaysColor(days) {
   return '#ff4d6d';
 }
 
-function logChange(entry) {
+function logChange(entry, opts) {
+  const silent = opts && opts.silent;
   changeLog.unshift({ ...entry, ts: new Date().toISOString() });
   localStorage.setItem('sw_admin_log', JSON.stringify(changeLog.slice(0, 500)));
-  renderChangelog();
+  if (!silent) renderChangelog();
 }
+
+function loadAdminTodos() {
+  let raw = [];
+  try { raw = JSON.parse(localStorage.getItem('sw_admin_todos') || '[]'); } catch (_) { raw = []; }
+  if (!Array.isArray(raw)) raw = [];
+  const cut = Date.now() - TODO_DONE_PRUNE_MS;
+  adminTodos = raw.filter(t => {
+    if (!t || !t.id) return false;
+    if (!t.done || !t.doneAt) return true;
+    return new Date(t.doneAt).getTime() > cut;
+  });
+  if (adminTodos.length !== raw.length) {
+    localStorage.setItem('sw_admin_todos', JSON.stringify(adminTodos));
+  }
+  return adminTodos;
+}
+
+function saveAdminTodos() {
+  localStorage.setItem('sw_admin_todos', JSON.stringify(adminTodos.slice(0, 200)));
+}
+
+function renderTodoNavBadge() {
+  const n = adminTodos.filter(t => !t.done).length;
+  const el = document.getElementById('navBadgeTodos');
+  if (el) el.textContent = n > 0 ? String(n) : '0';
+}
+
+function addRemovalTodo(uid, username) {
+  loadAdminTodos();
+  adminTodos.unshift({
+    id: 'todo_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9),
+    title: `Manual: remove Firebase Auth user if still present — @${username || 'unknown'} (${uid})`,
+    createdAt: new Date().toISOString(),
+    done: false,
+    doneAt: null
+  });
+  saveAdminTodos();
+  renderTodoNavBadge();
+}
+
+function renderTodos() {
+  loadAdminTodos();
+  const wrap = document.getElementById('todosContainer');
+  if (!wrap) return;
+  if (!adminTodos.length) {
+    wrap.innerHTML = '<div class="empty-state" style="padding:24px"><div class="empty-icon">✅</div>No follow-up tasks.</div>';
+    renderTodoNavBadge();
+    return;
+  }
+  wrap.innerHTML = '<div class="todo-list">' + adminTodos.map(t => {
+    const created = t.createdAt ? new Date(t.createdAt).toLocaleString() : '—';
+    const doneStr = t.done && t.doneAt ? 'Done ' + new Date(t.doneAt).toLocaleString() : 'Open';
+    return `<div class="todo-item${t.done ? ' done' : ''}" data-todo-id="${escHtml(t.id)}">
+      <input type="checkbox" ${t.done ? 'checked' : ''} onchange="swToggleTodo('${escHtml(t.id)}')" title="Mark done" />
+      <div class="todo-body">
+        <div class="todo-title">${escHtml(t.title || '')}</div>
+        <div class="todo-meta">Added: ${escHtml(created)} · ${escHtml(doneStr)}</div>
+      </div>
+    </div>`;
+  }).join('') + '</div>';
+  renderTodoNavBadge();
+}
+
+window.swToggleTodo = function(id) {
+  loadAdminTodos();
+  const t = adminTodos.find(x => x.id === id);
+  if (!t) return;
+  t.done = !t.done;
+  t.doneAt = t.done ? new Date().toISOString() : null;
+  saveAdminTodos();
+  renderTodos();
+};
+
+function logPurgeEligibleIndices() {
+  const now = Date.now();
+  return changeLog.map((c, i) => ({ c, i })).filter(({ c }) => {
+    if (!c || !c.ts) return false;
+    return now - new Date(c.ts).getTime() >= LOG_PURGE_MIN_AGE_MS;
+  });
+}
+
+window.swOpenLogPurgeModal = function() {
+  const modal = document.getElementById('logPurgeModal');
+  if (!modal) return;
+  logPurgeSelected = new Set();
+  logPurgePreviewVisible = false;
+  const prev = document.getElementById('logPurgePreview');
+  const prevBtn = document.getElementById('logPurgePreviewBtnLabel');
+  if (prev) { prev.style.display = 'none'; prev.textContent = ''; }
+  if (prevBtn) prevBtn.textContent = '👁 Show preview';
+  swRenderLogPurgeList();
+  modal.style.display = 'flex';
+};
+
+window.swCloseLogPurgeModal = function() {
+  const modal = document.getElementById('logPurgeModal');
+  if (modal) modal.style.display = 'none';
+};
+
+function swLogPurgeUpdateCount() {
+  const el = document.getElementById('logPurgeSelectedCount');
+  if (el) el.textContent = logPurgeSelected.size + ' selected';
+}
+
+window.swLogPurgeSelectAll = function() {
+  logPurgeEligibleIndices().forEach(({ i }) => logPurgeSelected.add(i));
+  swRenderLogPurgeList();
+};
+
+window.swLogPurgeSelectNone = function() {
+  logPurgeSelected = new Set();
+  swRenderLogPurgeList();
+};
+
+window.swLogPurgeToggleRow = function(idx) {
+  idx = Number(idx);
+  if (logPurgeSelected.has(idx)) logPurgeSelected.delete(idx);
+  else logPurgeSelected.add(idx);
+  swRenderLogPurgeList();
+};
+
+window.swLogPurgeTogglePreview = function() {
+  logPurgePreviewVisible = !logPurgePreviewVisible;
+  const prev = document.getElementById('logPurgePreview');
+  const lbl = document.getElementById('logPurgePreviewBtnLabel');
+  if (!prev || !lbl) return;
+  if (!logPurgePreviewVisible) {
+    prev.style.display = 'none';
+    lbl.textContent = '👁 Show preview';
+    return;
+  }
+  const lines = [...logPurgeSelected].sort((a,b)=>a-b).map(i => {
+    const c = changeLog[i];
+    if (!c) return '';
+    return (c.ts || '') + ' | ' + (c.type || '') + ' | @' + (c.username || c.uid || '') + ' | ' + (c.field || '') + ' | ' + String(c.oldVal) + ' → ' + String(c.newVal);
+  }).filter(Boolean);
+  prev.textContent = lines.length ? lines.join('\n') : '(nothing selected)';
+  prev.style.display = 'block';
+  lbl.textContent = '👁 Hide preview';
+};
+
+function swRenderLogPurgeList() {
+  const list = document.getElementById('logPurgeList');
+  if (!list) return;
+  const rows = logPurgeEligibleIndices();
+  if (!rows.length) {
+    list.innerHTML = '<div class="empty-state" style="padding:16px">No log entries older than 7 days.</div>';
+    swLogPurgeUpdateCount();
+    return;
+  }
+  list.innerHTML = '<table class="log-table" style="font-size:0.74rem"><thead><tr><th class="log-select-cell"></th><th>Time</th><th>Type</th><th>Target</th><th>Status</th></tr></thead><tbody>' +
+    rows.map(({ c, i }) => {
+      const sel = logPurgeSelected.has(i);
+      return `<tr>
+        <td class="log-select-cell"><input type="checkbox" ${sel ? 'checked' : ''} onchange="swLogPurgeToggleRow(${i})" /></td>
+        <td style="white-space:nowrap;color:var(--text3)">${escHtml(c.ts ? new Date(c.ts).toLocaleString() : '—')}</td>
+        <td>${escHtml(c.type || '—')}</td>
+        <td style="color:var(--accent)">@${escHtml(c.username || (c.uid && c.uid.slice(0, 8)) || '—')}</td>
+        <td style="font-size:0.65rem">${c.committed ? '<span style="color:var(--green)">PUSHED</span>' : '<span style="color:var(--red)">DISCARDED</span>'}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+  swLogPurgeUpdateCount();
+}
+
+window.swLogPurgeConfirm = function() {
+  if (!logPurgeSelected.size) { toast('Select at least one log row'); return; }
+  const previewLines = [...logPurgeSelected].sort((a,b)=>a-b).map(i => {
+    const c = changeLog[i];
+    if (!c) return null;
+    return (c.ts || '') + ' ' + (c.type || '') + ' @' + (c.username || c.uid || '');
+  }).filter(Boolean);
+  const msg = 'Delete ' + logPurgeSelected.size + ' log entr' + (logPurgeSelected.size !== 1 ? 'ies' : 'y') + ' from local storage?\n\nPreview (first 5):\n' + previewLines.slice(0, 5).join('\n');
+  if (!confirm(msg)) return;
+  const remove = new Set(logPurgeSelected);
+  const before = changeLog.length;
+  changeLog = changeLog.filter((_, idx) => !remove.has(idx));
+  localStorage.setItem('sw_admin_log', JSON.stringify(changeLog));
+  toast('🧹 Removed ' + (before - changeLog.length) + ' entr' + (before - changeLog.length !== 1 ? 'ies' : 'y'));
+  swCloseLogPurgeModal();
+  renderChangelog();
+};
 
 function addPending(change) {
   // Merge if same uid+field already pending
@@ -792,6 +1037,7 @@ window.swNavTo = function(page) {
   if (page === 'stats') swLoadStats();
   if (page === 'leaderboards') swLoadLeaderboards();
   if (page === 'changelog') renderChangelog();
+  if (page === 'todos') { loadAdminTodos(); renderTodos(); }
   if (page === 'security') swLoadSecurity();
 };
 
@@ -802,7 +1048,7 @@ window.swLoadUsers = async function() {
   const tbody = document.getElementById('usersTableBody');
   tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px"><div class="spinner"></div></td></tr>';
   try {
-    const snap = await getDocs(collection(db, 'hosts'));
+    const snap = await getDocsFromServer(collection(db, 'hosts'));
     usersCache = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
     document.getElementById('navBadgeUsers').textContent = usersCache.length;
     swFilterUsers();
@@ -932,7 +1178,7 @@ window.swLoadDrawerLb = async function() {
   const el = document.getElementById('drawerLbContent');
   el.innerHTML = '<div class="spinner"></div>';
   try {
-    const snap = await getDoc(doc(db, 'leaderboards', currentDrawerUid));
+    const snap = await getDocFromServer(doc(db, 'leaderboards', currentDrawerUid));
     if (!snap.exists()) { el.innerHTML = '<div style="color:var(--text3);font-size:0.78rem;font-weight:700">No leaderboard data yet.</div>'; return; }
     const data = snap.data();
     lbCache[currentDrawerUid] = data;
@@ -962,6 +1208,8 @@ window.swDeleteUserFromDrawer = async function() {
     batch.delete(doc(db, 'hosts', currentDrawerUid));
     batch.delete(doc(db, 'leaderboards', currentDrawerUid));
     await batch.commit();
+
+    addRemovalTodo(currentDrawerUid, user?.username);
 
     // Delete Firebase Auth account using the Admin REST API
     // This requires your Firebase Web API key and the user's ID token — but we
@@ -1001,30 +1249,68 @@ window.swDeleteUserFromDrawer = async function() {
 };
 
 // ══════════════════════════════════════════════════════════════
-//  PENDING CHANGES → PUSH
+//  PENDING CHANGES → PUSH (Firestore writeBatch, chunked)
 // ══════════════════════════════════════════════════════════════
+function applyPendingChangeToBatch(batch, change) {
+  if (change._lbUid && change._lbData) {
+    batch.set(doc(db, 'leaderboards', change._lbUid), {
+      players: change._lbData.players,
+      lastSynced: serverTimestamp()
+    });
+  } else if (change._lbUid && change.field === 'players' && !change._lbData) {
+    const cached = lbCache[change._lbUid];
+    if (cached) {
+      batch.set(doc(db, 'leaderboards', change._lbUid), {
+        players: cached.players || [],
+        lastSynced: serverTimestamp()
+      });
+    }
+  } else {
+    batch.set(doc(db, 'hosts', change.uid), { [change.field]: change.newVal }, { merge: true });
+  }
+}
+
 window.swPushChanges = async function() {
   if (!pendingChanges.length) { toast('No pending changes'); return; }
   const btn = document.getElementById('pushAllBtn');
   if (btn) btn.disabled = true;
-  let pushed = 0, failed = 0;
-  for (const change of pendingChanges) {
-    try {
-      await setDoc(doc(db, 'hosts', change.uid), { [change.field]: change.newVal }, { merge: true });
-      // Sync to local cache
-      const cached = usersCache.find(u => u.uid === change.uid);
-      if (cached) cached[change.field] = change.newVal;
-      logChange({ ...change, committed: true });
-      pushed++;
-    } catch(e) {
-      toast(`✗ Failed to push ${change.field} for ${change.uid}: ${e.message}`);
-      failed++;
+  const queue = [...pendingChanges];
+  const MAX_OPS = 450;
+  let offset = 0;
+  let pushed = 0;
+  try {
+    while (offset < queue.length) {
+      const chunk = queue.slice(offset, offset + MAX_OPS);
+      const batch = writeBatch(db);
+      for (const change of chunk) applyPendingChangeToBatch(batch, change);
+      await batch.commit();
+      for (const change of chunk) {
+        if (change._lbUid && change._lbData) {
+          lbCache[change._lbUid] = {
+            players: change._lbData.players,
+            lastSynced: new Date()
+          };
+        } else if (change._lbUid && change.field === 'players' && !change._lbData) {
+          /* lbCache already updated locally when editing LB */
+        } else {
+          const cached = usersCache.find(u => u.uid === change.uid);
+          if (cached) cached[change.field] = change.newVal;
+        }
+        logChange({ ...change, committed: true }, { silent: true });
+        pushed++;
+      }
+      offset += chunk.length;
     }
+    pendingChanges = [];
+    renderPendingBanner();
+    swFilterUsers();
+    renderChangelog();
+    toast(`✅ Pushed ${pushed} change${pushed !== 1 ? 's' : ''} in batch(es)`);
+  } catch (e) {
+    pendingChanges = queue.slice(offset);
+    renderPendingBanner();
+    toast(`✗ Batch push failed: ${e.message} (${pushed} applied, ${pendingChanges.length} re-queued)`);
   }
-  pendingChanges = [];
-  renderPendingBanner();
-  swFilterUsers();
-  toast(`✅ Pushed ${pushed} change${pushed !== 1 ? 's' : ''}${failed ? ` (${failed} failed)` : ''}`);
   if (btn) btn.disabled = false;
 };
 
@@ -1049,9 +1335,8 @@ function renderChangelog() {
     ...changeLog
   ];
 
-  // Update stats bar
-  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-  const oldCount = changeLog.filter(c => c.ts && new Date(c.ts).getTime() <= cutoff).length;
+  // Update stats bar (entries eligible for manual purge = 7+ days old)
+  const oldCount = logPurgeEligibleIndices().length;
   const rawSize = localStorage.getItem('sw_admin_log') || '';
   const sizeKb = (new Blob([rawSize]).size / 1024).toFixed(1);
   const totalEl = document.getElementById('logStatTotal');
@@ -1083,12 +1368,21 @@ function renderChangelog() {
 //  STATS  (calculated from in-memory cache — no extra reads)
 // ══════════════════════════════════════════════════════════════
 window.swLoadStats = async function() {
-  // If no users cached yet, load them first
-  if (!usersCache.length) await swLoadUsers();
-  // Load all leaderboards for premium users (one batch fetch)
+  try {
+    const snap = await getDocsFromServer(collection(db, 'hosts'));
+    usersCache = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+    document.getElementById('navBadgeUsers').textContent = usersCache.length;
+    swFilterUsers();
+  } catch (e) {
+    if (!usersCache.length) {
+      toast('✗ Could not refresh users for stats: ' + e.message);
+      return;
+    }
+    toast('⚠️ Stats using cached users — ' + e.message);
+  }
   const premUsers = usersCache.filter(u => u.isPremium);
   const lbSnaps = await Promise.allSettled(
-    premUsers.map(u => getDoc(doc(db, 'leaderboards', u.uid)))
+    premUsers.map(u => getDocFromServer(doc(db, 'leaderboards', u.uid)))
   );
   lbSnaps.forEach((result, i) => {
     if (result.status === 'fulfilled' && result.value.exists()) {
@@ -1178,7 +1472,7 @@ window.swLoadLeaderboards = async function() {
   const premUsers = usersCache.filter(u => u.isPremium);
   if (!premUsers.length) { container.innerHTML = '<div class="empty-state"><div class="empty-icon">🏅</div>No premium users yet.</div>'; return; }
 
-  const results = await Promise.allSettled(premUsers.map(u => getDoc(doc(db, 'leaderboards', u.uid))));
+  const results = await Promise.allSettled(premUsers.map(u => getDocFromServer(doc(db, 'leaderboards', u.uid))));
   let html = '';
   results.forEach((res, i) => {
     const user = premUsers[i];
@@ -1256,48 +1550,6 @@ window.swQueueLbChanges = function(uid) {
   toast('✅ LB changes queued — push from Change Log or banner');
 };
 
-// Override swPushChanges to handle LB saves too
-const _origPush = window.swPushChanges;
-window.swPushChanges = async function() {
-  if (!pendingChanges.length) { toast('No pending changes'); return; }
-  const btn = document.getElementById('pushAllBtn');
-  if (btn) btn.disabled = true;
-  let pushed = 0, failed = 0;
-  for (const change of pendingChanges) {
-    try {
-      if (change._lbUid && change._lbData) {
-        // Leaderboard save
-        await setDoc(doc(db, 'leaderboards', change._lbUid), {
-          players: change._lbData.players,
-          lastSynced: serverTimestamp()
-        });
-      } else if (change._lbUid && change.field === 'players' && !change._lbData) {
-        // Remove-only (no _lbData) — rebuild from cache
-        const cached = lbCache[change._lbUid];
-        if (cached) await setDoc(doc(db, 'leaderboards', change._lbUid), {
-          players: cached.players || [],
-          lastSynced: serverTimestamp()
-        });
-      } else {
-        // Host field edit
-        await setDoc(doc(db, 'hosts', change.uid), { [change.field]: change.newVal }, { merge: true });
-        const cached = usersCache.find(u => u.uid === change.uid);
-        if (cached) cached[change.field] = change.newVal;
-      }
-      logChange({ ...change, committed: true });
-      pushed++;
-    } catch(e) {
-      toast(`✗ Push failed for ${change.label}: ${e.message}`);
-      failed++;
-    }
-  }
-  pendingChanges = [];
-  renderPendingBanner();
-  swFilterUsers();
-  toast(`✅ Pushed ${pushed} change${pushed !== 1 ? 's' : ''}${failed ? ` (${failed} failed)` : ''}`);
-  if (btn) btn.disabled = false;
-};
-
 // ══════════════════════════════════════════════════════════════
 //  SECURITY PAGE
 // ══════════════════════════════════════════════════════════════
@@ -1334,27 +1586,6 @@ window.swUpdateAdminAccount = async function() {
       toast('✅ Profile saved');
     }
   } catch(e) { toast('✗ ' + e.message); }
-};
-
-// ══════════════════════════════════════════════════════════════
-//  CHANGE LOG — CLEAR OLD ENTRIES
-// ══════════════════════════════════════════════════════════════
-window.swClearOldLogs = function() {
-  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000; // 30 days ago
-  const before = changeLog.length;
-  // Only remove committed/discarded entries older than 30 days — never pending
-  changeLog = changeLog.filter(function(c) {
-    if (!c.ts) return false; // no timestamp = remove
-    return new Date(c.ts).getTime() > cutoff;
-  });
-  const removed = before - changeLog.length;
-  if (removed === 0) {
-    toast('No log entries older than 30 days to remove');
-    return;
-  }
-  localStorage.setItem('sw_admin_log', JSON.stringify(changeLog));
-  renderChangelog();
-  toast('🧹 Removed ' + removed + ' old log entr' + (removed === 1 ? 'y' : 'ies'));
 };
 
 // ══════════════════════════════════════════════════════════════
