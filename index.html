@@ -159,7 +159,26 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .username-cell { display: flex; align-items: center; gap: 8px; }
 .user-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .premium-badge { display: inline-flex; align-items: center; gap: 4px; background: rgba(245,200,66,0.1); border: 1px solid rgba(245,200,66,0.3); color: var(--gold); border-radius: 6px; padding: 2px 7px; font-size: 0.65rem; font-weight: 800; }
+.premium-override-badge { display: inline-flex; align-items: center; gap: 4px; background: rgba(124,90,240,0.12); border: 1px solid rgba(124,90,240,0.4); color: var(--accent2); border-radius: 6px; padding: 2px 7px; font-size: 0.65rem; font-weight: 800; }
+.premium-temp-badge { display: inline-flex; align-items: center; gap: 4px; background: rgba(255,140,66,0.12); border: 1px solid rgba(255,140,66,0.35); color: var(--orange); border-radius: 6px; padding: 2px 7px; font-size: 0.65rem; font-weight: 800; }
 .free-badge { display: inline-flex; align-items: center; gap: 4px; background: rgba(139,154,181,0.1); border: 1px solid rgba(139,154,181,0.2); color: var(--text3); border-radius: 6px; padding: 2px 7px; font-size: 0.65rem; font-weight: 800; }
+
+/* ===== PREMIUM OVERRIDE SECTION ===== */
+.override-status-pill {
+  display: inline-flex; align-items: center; gap: 6px; border-radius: 8px;
+  padding: 4px 10px; font-size: 0.72rem; font-weight: 800;
+}
+.override-status-pill.active-always { background: rgba(124,90,240,0.15); border: 1px solid rgba(124,90,240,0.4); color: var(--accent2); }
+.override-status-pill.active-temp   { background: rgba(255,140,66,0.12); border: 1px solid rgba(255,140,66,0.35); color: var(--orange); }
+.override-status-pill.inactive      { background: rgba(85,96,128,0.15); border: 1px solid rgba(85,96,128,0.25); color: var(--text3); }
+.override-mode-btn {
+  flex: 1; padding: 8px 10px; border-radius: var(--radius-sm); font-family: var(--sans);
+  font-weight: 800; font-size: 0.73rem; cursor: pointer; transition: all 0.18s;
+  border: 1.5px solid var(--border2); background: var(--surface); color: var(--text2); text-align: center;
+}
+.override-mode-btn.selected { border-color: var(--accent2); background: rgba(124,90,240,0.15); color: var(--accent2); }
+.override-date-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+input[type="date"].field-input { color-scheme: dark; }
 .last-login-chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 6px; padding: 2px 8px; font-size: 0.72rem; font-weight: 700; font-family: var(--mono); }
 
 /* ===== USER PROFILE DRAWER ===== */
@@ -408,7 +427,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
       </div>
       <div class="stats-grid" id="statsGrid">
         <div class="stat-card" style="--accent-clr:var(--accent)"><div class="stat-value" id="statTotalUsers">—</div><div class="stat-label">Total Users</div></div>
-        <div class="stat-card" style="--accent-clr:var(--gold)"><div class="stat-value" id="statPremiumUsers">—</div><div class="stat-label">Premium Users</div></div>
+        <div class="stat-card" style="--accent-clr:var(--gold)"><div class="stat-value" id="statPremiumUsers">—</div><div class="stat-label">Premium Users</div><div class="stat-delta" id="statPremiumOverrides" style="color:var(--accent2)"></div></div>
         <div class="stat-card" style="--accent-clr:var(--green)"><div class="stat-value" id="statActiveWeek">—</div><div class="stat-label">Active (7 days)</div></div>
         <div class="stat-card" style="--accent-clr:var(--red)"><div class="stat-value" id="statInactive30">—</div><div class="stat-label">Inactive 30+ days</div></div>
         <div class="stat-card" style="--accent-clr:var(--accent2)"><div class="stat-value" id="statTotalPlayers">—</div><div class="stat-label">Total LB Players</div></div>
@@ -571,10 +590,40 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
         <input class="field-input" id="dUsername" oninput="swMarkFieldChanged('username', this.value)" />
       </div>
     </div>
-    <div class="toggle-row" style="margin-top:12px">
-      <div class="toggle-label">⭐ Premium</div>
-      <div class="toggle-switch" id="dPremiumToggle" onclick="swTogglePremium()"></div>
+  </div>
+
+  <!-- Manual Premium Override -->
+  <div class="drawer-section" id="drawerPremiumSection" style="border-color:rgba(124,90,240,0.3)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div class="drawer-section-title" style="margin-bottom:0;color:var(--accent2)">⭐ Manual Premium Override</div>
+      <span id="overrideStatusPill" class="override-status-pill inactive">Inactive</span>
     </div>
+
+    <div style="font-size:0.7rem;font-weight:600;color:var(--text3);margin-bottom:10px;line-height:1.55">
+      Manual override <strong style="color:var(--text2)">always wins</strong> over the future Xsee subscriber API. Use this to grant free premium access.
+    </div>
+
+    <!-- Mode buttons -->
+    <div style="display:flex;gap:8px;margin-bottom:2px">
+      <div class="override-mode-btn" id="overrideModeOff" onclick="swSetOverrideMode('off')">✕ Off</div>
+      <div class="override-mode-btn" id="overrideModeAlways" onclick="swSetOverrideMode('always')">♾ Always on</div>
+      <div class="override-mode-btn" id="overrideModeTemp" onclick="swSetOverrideMode('temp')">📅 Date range</div>
+    </div>
+
+    <!-- Date range (shown when mode=temp) -->
+    <div id="overrideDateRow" class="override-date-row" style="display:none">
+      <div class="field-group">
+        <div class="field-label">Start date</div>
+        <input type="date" class="field-input" id="overrideStartDate" oninput="swMarkOverrideDirty()" />
+      </div>
+      <div class="field-group">
+        <div class="field-label">End date</div>
+        <input type="date" class="field-input" id="overrideEndDate" oninput="swMarkOverrideDirty()" />
+      </div>
+    </div>
+
+    <!-- Current effective state (read-only info) -->
+    <div id="overrideCurrentInfo" style="margin-top:10px;font-size:0.7rem;font-weight:700;color:var(--text3);font-family:var(--mono);display:none"></div>
   </div>
 
   <!-- Leaderboard (premium only) -->
@@ -1063,14 +1112,14 @@ window.swFilterUsers = function() {
   const prem = document.getElementById('filterPremiumOnly').checked;
   let list = usersCache.filter(u =>
     (!q || (u.username || '').toLowerCase().includes(q)) &&
-    (!prem || u.isPremium)
+    (!prem || resolveEffectivePremium(u))
   );
   list.sort((a, b) => {
     if (s === 'username')      return (a.username||'').localeCompare(b.username||'');
     if (s === 'username-desc') return (b.username||'').localeCompare(a.username||'');
     if (s === 'lastLogin')     return (b.lastLogin?.toMillis?.() || 0) - (a.lastLogin?.toMillis?.() || 0);
     if (s === 'lastLogin-asc') return (a.lastLogin?.toMillis?.() || 0) - (b.lastLogin?.toMillis?.() || 0);
-    if (s === 'premium')       return (b.isPremium ? 1 : 0) - (a.isPremium ? 1 : 0);
+    if (s === 'premium')       return (resolveEffectivePremium(b) ? 1 : 0) - (resolveEffectivePremium(a) ? 1 : 0);
     if (s === 'inactive')      return (daysAgo(b.lastLogin)||0) - (daysAgo(a.lastLogin)||0);
     return 0;
   });
@@ -1092,9 +1141,7 @@ function renderUsersTable(list) {
     const days  = daysAgo(u.lastLogin);
     const color = inactiveDaysColor(days);
     const dStr  = days === null ? '—' : days === 0 ? 'Today' : days + 'd ago';
-    const pBadge = u.isPremium
-      ? '<span class="premium-badge">⭐ Premium</span>'
-      : '<span class="free-badge">Free</span>';
+    const pBadge = effectivePremiumBadge(u);
     return `<tr onclick="swOpenDrawer('${u.uid}')">
       <td><div class="username-cell"><div class="user-dot" style="background:${color}"></div><strong>@${escHtml(u.username||'—')}</strong></div></td>
       <td>${pBadge}</td>
@@ -1123,11 +1170,12 @@ window.swOpenDrawer = function(uid) {
   document.getElementById('dInactiveDays').value = days === null ? '—' : days + ' days';
   document.getElementById('dUsername').value   = user.username || '';
 
-  const tog = document.getElementById('dPremiumToggle');
-  tog.classList.toggle('on', !!user.isPremium);
+  // Load override state into UI
+  swRenderOverrideSection(user);
 
-  // Show leaderboard section for premium
-  document.getElementById('drawerLbSection').style.display = user.isPremium ? 'block' : 'none';
+  // Show leaderboard section based on effective premium
+  const effPrem = resolveEffectivePremium(user);
+  document.getElementById('drawerLbSection').style.display = effPrem ? 'block' : 'none';
   document.getElementById('drawerLbContent').innerHTML = '<div class="empty-state" style="padding:10px">Click Load to fetch</div>';
 
   document.getElementById('drawerBackdrop').classList.add('show');
@@ -1148,15 +1196,147 @@ window.swMarkFieldChanged = function(field, val) {
   else delete drawerEdits[field];
 };
 
-window.swTogglePremium = function() {
-  const tog = document.getElementById('dPremiumToggle');
+// ══════════════════════════════════════════════════════════════
+//  PREMIUM OVERRIDE HELPERS
+// ══════════════════════════════════════════════════════════════
+
+// Resolve effective premium status for a user (admin override wins over API)
+function resolveEffectivePremium(user) {
+  const ov = user.premiumOverride;
+  if (!ov || !ov.active) return !!user.isPremium; // fall through to future API field
+  if (ov.mode === 'always') return true;
+  if (ov.mode === 'temp') {
+    const now = Date.now();
+    const start = ov.startDate ? new Date(ov.startDate).getTime() : 0;
+    const end   = ov.endDate   ? new Date(ov.endDate).getTime()   : Infinity;
+    return now >= start && now <= end;
+  }
+  return false;
+}
+
+// Badge HTML for users table
+function effectivePremiumBadge(user) {
+  const ov = user.premiumOverride;
+  if (ov && ov.active) {
+    if (ov.mode === 'always') return '<span class="premium-override-badge">⭐ Manual ♾</span>';
+    if (ov.mode === 'temp') {
+      if (resolveEffectivePremium(user)) return '<span class="premium-temp-badge">⭐ Temp ⏳</span>';
+      return '<span class="free-badge">Temp expired</span>';
+    }
+  }
+  if (user.isPremium) return '<span class="premium-badge">⭐ Premium</span>';
+  return '<span class="free-badge">Free</span>';
+}
+
+// Format a Firestore Timestamp or ISO string to YYYY-MM-DD for date inputs
+function tsToDateInput(ts) {
+  if (!ts) return '';
+  try {
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toISOString().slice(0, 10);
+  } catch { return ''; }
+}
+
+// Render override section UI from user data
+function swRenderOverrideSection(user) {
+  const ov = user.premiumOverride || {};
+  const mode = (ov.active && ov.mode) ? ov.mode : 'off';
+
+  // Set mode buttons
+  ['off','always','temp'].forEach(m => {
+    document.getElementById('overrideMode' + m.charAt(0).toUpperCase() + m.slice(1))
+      ?.classList.toggle('selected', m === mode);
+  });
+
+  // Date row visibility
+  const dateRow = document.getElementById('overrideDateRow');
+  dateRow.style.display = mode === 'temp' ? 'grid' : 'none';
+
+  // Dates
+  document.getElementById('overrideStartDate').value = tsToDateInput(ov.startDate) || '';
+  document.getElementById('overrideEndDate').value   = tsToDateInput(ov.endDate)   || '';
+
+  // Status pill
+  const pill = document.getElementById('overrideStatusPill');
+  if (mode === 'off') {
+    pill.className = 'override-status-pill inactive';
+    pill.textContent = 'Inactive';
+  } else if (mode === 'always') {
+    pill.className = 'override-status-pill active-always';
+    pill.textContent = '♾ Always Active';
+  } else {
+    const isActive = resolveEffectivePremium(user);
+    pill.className = 'override-status-pill ' + (isActive ? 'active-temp' : 'inactive');
+    pill.textContent = isActive ? '⏳ Temp Active' : '⏳ Expired';
+  }
+
+  // Info line
+  const info = document.getElementById('overrideCurrentInfo');
+  if (ov.setBy || ov.setAt) {
+    const setAt = ov.setAt ? (ov.setAt.toDate ? ov.setAt.toDate() : new Date(ov.setAt)).toLocaleString() : '—';
+    info.style.display = 'block';
+    info.textContent = `Set by: ${ov.setBy || '—'} · ${setAt}`;
+  } else {
+    info.style.display = 'none';
+  }
+
+  // Store current mode in a data attribute for read-back
+  document.getElementById('drawerPremiumSection').dataset.mode = mode;
+}
+
+window.swSetOverrideMode = function(mode) {
+  const section = document.getElementById('drawerPremiumSection');
+  const prev = section.dataset.mode || 'off';
+  if (mode === prev) return;
+  section.dataset.mode = mode;
+
+  // Update buttons
+  ['off','always','temp'].forEach(m => {
+    document.getElementById('overrideMode' + m.charAt(0).toUpperCase() + m.slice(1))
+      ?.classList.toggle('selected', m === mode);
+  });
+
+  // Date row
+  document.getElementById('overrideDateRow').style.display = mode === 'temp' ? 'grid' : 'none';
+
+  // Status pill
+  const pill = document.getElementById('overrideStatusPill');
+  if (mode === 'off') {
+    pill.className = 'override-status-pill inactive';
+    pill.textContent = 'Inactive';
+  } else if (mode === 'always') {
+    pill.className = 'override-status-pill active-always';
+    pill.textContent = '♾ Always Active';
+  } else {
+    pill.className = 'override-status-pill active-temp';
+    pill.textContent = '⏳ Date range';
+  }
+
+  // Update leaderboard section visibility preview
+  const effOn = mode !== 'off';
+  document.getElementById('drawerLbSection').style.display = effOn ? 'block' : 'none';
+
+  swMarkOverrideDirty();
+};
+
+window.swMarkOverrideDirty = function() {
+  // Build override object from current UI state and stash in drawerEdits
+  const mode = document.getElementById('drawerPremiumSection').dataset.mode || 'off';
+  const startDate = document.getElementById('overrideStartDate').value || null;
+  const endDate   = document.getElementById('overrideEndDate').value   || null;
   const user = usersCache.find(u => u.uid === currentDrawerUid);
   if (!user) return;
-  const newVal = !tog.classList.contains('on');
-  tog.classList.toggle('on', newVal);
-  if (newVal !== user.isPremium) drawerEdits.isPremium = newVal;
-  else delete drawerEdits.isPremium;
-  document.getElementById('drawerLbSection').style.display = newVal ? 'block' : 'none';
+
+  let newOverride;
+  if (mode === 'off') {
+    newOverride = { active: false, mode: 'off', startDate: null, endDate: null };
+  } else if (mode === 'always') {
+    newOverride = { active: true, mode: 'always', startDate: null, endDate: null };
+  } else {
+    newOverride = { active: true, mode: 'temp', startDate, endDate };
+  }
+
+  drawerEdits.premiumOverride = newOverride;
 };
 
 window.swSaveDrawerChanges = function() {
@@ -1164,10 +1344,32 @@ window.swSaveDrawerChanges = function() {
     toast('No changes to queue'); return;
   }
   const user = usersCache.find(u => u.uid === currentDrawerUid);
+
   Object.entries(drawerEdits).forEach(([field, newVal]) => {
-    const oldVal = user[field];
-    addPending({ uid: currentDrawerUid, field, oldVal, newVal, type: 'user_edit',
-      label: `@${user.username}: ${field} → ${newVal}`, committed: false });
+    if (field === 'premiumOverride') {
+      // Add admin metadata to the override object
+      const enriched = {
+        ...newVal,
+        setBy: adminUser?.displayName || adminUser?.email || 'admin',
+        setAt: new Date().toISOString()
+      };
+      const modeLabel = newVal.mode === 'off' ? 'removed' :
+        newVal.mode === 'always' ? 'always-on' :
+        `temp ${newVal.startDate||'?'} → ${newVal.endDate||'?'}`;
+      addPending({
+        uid: currentDrawerUid, field: 'premiumOverride',
+        oldVal: user.premiumOverride ? `${user.premiumOverride.mode || 'off'}` : 'none',
+        newVal: modeLabel,
+        type: 'premium_override',
+        label: `@${user.username}: premium override → ${modeLabel}`,
+        committed: false,
+        _overrideData: enriched
+      });
+    } else {
+      const oldVal = user[field];
+      addPending({ uid: currentDrawerUid, field, oldVal, newVal, type: 'user_edit',
+        label: `@${user.username}: ${field} → ${newVal}`, committed: false });
+    }
   });
   toast('✅ Changes queued — go to Change Log to push');
   swCloseDrawer();
@@ -1265,6 +1467,9 @@ function applyPendingChangeToBatch(batch, change) {
         lastSynced: serverTimestamp()
       });
     }
+  } else if (change.type === 'premium_override' && change._overrideData) {
+    // Write the whole override sub-object atomically — single field merge
+    batch.set(doc(db, 'hosts', change.uid), { premiumOverride: change._overrideData }, { merge: true });
   } else {
     batch.set(doc(db, 'hosts', change.uid), { [change.field]: change.newVal }, { merge: true });
   }
@@ -1292,6 +1497,9 @@ window.swPushChanges = async function() {
           };
         } else if (change._lbUid && change.field === 'players' && !change._lbData) {
           /* lbCache already updated locally when editing LB */
+        } else if (change.type === 'premium_override' && change._overrideData) {
+          const cached = usersCache.find(u => u.uid === change.uid);
+          if (cached) cached.premiumOverride = change._overrideData;
         } else {
           const cached = usersCache.find(u => u.uid === change.uid);
           if (cached) cached[change.field] = change.newVal;
@@ -1380,7 +1588,7 @@ window.swLoadStats = async function() {
     }
     toast('⚠️ Stats using cached users — ' + e.message);
   }
-  const premUsers = usersCache.filter(u => u.isPremium);
+  const premUsers = usersCache.filter(u => resolveEffectivePremium(u));
   const lbSnaps = await Promise.allSettled(
     premUsers.map(u => getDocFromServer(doc(db, 'leaderboards', u.uid)))
   );
@@ -1391,7 +1599,8 @@ window.swLoadStats = async function() {
   });
 
   const total    = usersCache.length;
-  const premium  = usersCache.filter(u => u.isPremium).length;
+  const premium  = premUsers.length;
+  const manualOverrides = usersCache.filter(u => u.premiumOverride?.active).length;
   const active7  = usersCache.filter(u => daysAgo(u.lastLogin) !== null && daysAgo(u.lastLogin) <= 7).length;
   const inact30  = usersCache.filter(u => daysAgo(u.lastLogin) === null || daysAgo(u.lastLogin) > 30).length;
 
@@ -1404,6 +1613,8 @@ window.swLoadStats = async function() {
 
   document.getElementById('statTotalUsers').textContent   = total;
   document.getElementById('statPremiumUsers').textContent = premium;
+  document.getElementById('statPremiumOverrides').textContent =
+    manualOverrides ? `${manualOverrides} manual override${manualOverrides !== 1 ? 's' : ''}` : '';
   document.getElementById('statActiveWeek').textContent   = active7;
   document.getElementById('statInactive30').textContent   = inact30;
   document.getElementById('statTotalPlayers').textContent = totalPlayers;
@@ -1469,7 +1680,7 @@ window.swLoadLeaderboards = async function() {
   const container = document.getElementById('lbContainer');
   container.innerHTML = '<div class="empty-state"><div class="spinner"></div> Loading…</div>';
   if (!usersCache.length) await swLoadUsers();
-  const premUsers = usersCache.filter(u => u.isPremium);
+  const premUsers = usersCache.filter(u => resolveEffectivePremium(u));
   if (!premUsers.length) { container.innerHTML = '<div class="empty-state"><div class="empty-icon">🏅</div>No premium users yet.</div>'; return; }
 
   const results = await Promise.allSettled(premUsers.map(u => getDocFromServer(doc(db, 'leaderboards', u.uid))));
@@ -1480,6 +1691,11 @@ window.swLoadLeaderboards = async function() {
     if (data) lbCache[user.uid] = data;
     const players = data?.players?.slice().sort((a,b) => b.points-a.points) || [];
     const syncStr = data?.lastSynced?.toDate?.()?.toLocaleString() || '—';
+    const ovBadge = user.premiumOverride?.active
+      ? (user.premiumOverride.mode === 'always'
+          ? `<span class="premium-override-badge" style="margin-left:8px">⭐ Manual ♾</span>`
+          : `<span class="premium-temp-badge" style="margin-left:8px">⭐ Temp ⏳</span>`)
+      : `<span class="premium-badge" style="margin-left:8px">⭐ Premium</span>`;
     html += `<div class="lb-card" id="lbcard-${user.uid}">
       <div class="lb-card-header" onclick="swToggleLbCard('${user.uid}')">
         <span style="font-size:1rem">🏅</span>
@@ -1487,7 +1703,7 @@ window.swLoadLeaderboards = async function() {
           <div style="font-weight:800;font-size:0.88rem">@${escHtml(user.username||'—')}</div>
           <div style="font-size:0.68rem;color:var(--text3);font-family:var(--mono)">Last synced: ${syncStr} · ${players.length} players</div>
         </div>
-        <span class="premium-badge" style="margin-left:8px">⭐ Premium</span>
+        ${ovBadge}
         <span class="lb-card-chevron">▼</span>
       </div>
       <div class="lb-card-body">
@@ -1595,7 +1811,7 @@ window.swOpenMigrateModal = function() {
   const modal = document.getElementById('migrateModal');
   if (!modal) return;
   // Populate selects with premium users who have leaderboards
-  const premUsers = usersCache.filter(u => u.isPremium);
+  const premUsers = usersCache.filter(u => resolveEffectivePremium(u));
   if (premUsers.length < 2) { toast('Need at least 2 premium users to migrate'); return; }
   const opts = premUsers.map(u => `<option value="${escHtml(u.uid)}">${escHtml('@' + (u.username || u.uid.slice(0,8)))}</option>`).join('');
   document.getElementById('migrateFrom').innerHTML = opts;
